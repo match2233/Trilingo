@@ -4,8 +4,8 @@
 把 base_url 换成对应的地址即可。
 
 配置存放在 data/llm.json:
-    {"api_key": "sk-...", "base_url": "https://api.deepseek.com/v1",
-     "model": "deepseek-chat", "enabled": true}
+    {"api_key": "sk-...", "base_url": "https://api.deepseek.com",
+     "model": "deepseek-flash", "enabled": true}
 也可以用环境变量 DEEPSEEK_API_KEY 提供密钥。
 
 成本参考: 本应用一次只发没见过的生词, 每批 25 个词,
@@ -27,8 +27,8 @@ CONFIG_FILE = DATA_DIR / "llm.json"
 
 DEFAULTS = {
     "api_key": "",
-    "base_url": "https://api.deepseek.com/v1",
-    "model": "deepseek-chat",
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-flash",
     "enabled": True,
 }
 

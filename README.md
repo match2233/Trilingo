@@ -151,7 +151,12 @@ trilingo/
     └─ 词汇日.xlsx          词表格式示例
 ```
 
-程序首次运行后会生成 `trilingo.db`（SQLite 数据库）与 `trilingo.log`（运行日志）。
+程序首次运行后会生成 `trilingo.db`（SQLite 数据库，保存词条、错题与打卡记录）
+与 `trilingo.log`（运行日志）。
+
+每次启动会在 `backups/` 下留一份数据库快照，保留最近 10 份。
+练习数据一旦丢失无法从词表重建（错题本、打卡记录只存在于数据库中），
+如需回退，把 `backups/` 里的文件复制回 `trilingo.db` 即可。
 
 ## 关于源文件
 

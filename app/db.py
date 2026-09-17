@@ -469,11 +469,83 @@ class Database:
         )
 
     def reset_plan(self, lang: str, day: str | None = None) -> None:
-        """重新抽取当天单词."""
+        """重新抽取当天单词 (会丢弃当天已答记录, 仅在用户明确要求时使用)."""
         day = day or today()
         self.conn.execute("DELETE FROM daily_plan WHERE day=? AND lang=?", (day, lang))
         self.conn.execute("DELETE FROM daily_log WHERE day=? AND lang=?", (day, lang))
         self.conn.commit()
+
+    def add_to_today(self, lang: str, word_id: int, kind: str = "review",
+                     day: str | None = None) -> None:
+        """把某个词补进当天计划, 不触碰其它词已有的作答记录."""
+        day = day or today()
+        have = self.conn.execute(
+            "SELECT COUNT(*) c FROM daily_plan WHERE day=? AND lang=?", (day, lang)
+        ).fetchone()["c"]
+        if not have:
+            self.ensure_plan(lang, day)      # 当天还没计划, 正常生成
+            return
+
+        row = self.conn.execute(
+            "SELECT answered FROM daily_plan WHERE day=? AND lang=? AND word_id=?",
+            (day, lang, word_id),
+        ).fetchone()
+        if row is None:
+            nxt = self.conn.execute(
+                "SELECT COALESCE(MAX(seq), -1) + 1 s FROM daily_plan WHERE day=? AND lang=?",
+                (day, lang),
+            ).fetchone()["s"]
+            self.conn.execute(
+                "INSERT INTO daily_plan (day,lang,word_id,kind,seq) VALUES (?,?,?,?,?)",
+                (day, lang, word_id, kind, nxt),
+            )
+        elif row["answered"]:
+            # 今天已考过, 重置为未答让它重新出现 (当天只影响这一个词)
+            self.conn.execute(
+                "UPDATE daily_plan SET answered=0, correct=0"
+                " WHERE day=? AND lang=? AND word_id=?",
+                (day, lang, word_id),
+            )
+        self._refresh_log(lang, day)
+        self.conn.commit()
+
+    def remove_from_today(self, lang: str, word_id: int, day: str | None = None) -> None:
+        """只把某个词移出当天计划, 其它词的进度不受影响."""
+        day = day or today()
+        self.conn.execute(
+            "DELETE FROM daily_plan WHERE day=? AND lang=? AND word_id=?",
+            (day, lang, word_id),
+        )
+        self._refresh_log(lang, day)
+        self.conn.commit()
+
+    # ------------------------------------------------------------ 备份
+    def backup(self, keep: int = 10) -> Path | None:
+        """把当前数据库快照存到 backups/, 保留最近 keep 份.
+
+        用 SQLite 自己的备份接口, 运行中也能安全复制。
+        """
+        try:
+            import datetime as _dt
+
+            bdir = self.path.parent / "backups"
+            bdir.mkdir(exist_ok=True)
+            stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+            dest = bdir / f"trilingo-{stamp}.db"
+
+            target = sqlite3.connect(str(dest))
+            try:
+                self.conn.backup(target)
+            finally:
+                target.close()
+
+            # 只保留最近 keep 份
+            old = sorted(bdir.glob("trilingo-*.db"))
+            for f in old[:-keep]:
+                f.unlink(missing_ok=True)
+            return dest
+        except Exception:
+            return None
 
     # ------------------------------------------------------------ 打卡
     def streak(self) -> int:

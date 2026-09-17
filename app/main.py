@@ -34,6 +34,11 @@ def main() -> int:
 
     db = Database(C.DB_PATH)
 
+    # 启动时留一份当日快照, 万一数据被误删还能找回来
+    snap = db.backup()
+    if snap:
+        log.info("数据库快照: %s", snap)
+
     app = TrilingoApp(db)
 
     def report(exc, val, tb):

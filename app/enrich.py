@@ -220,7 +220,7 @@ def enrich_japanese(db, *, online: bool = True, max_online: int = 60) -> dict:
         " FROM jp_words WHERE active=1"
     ).fetchall()
 
-    stats = {"seed": 0, "accent": 0, "online": 0, "online_failed": 0}
+    stats = {"seed": 0, "accent": 0, "ai": 0, "online": 0, "online_failed": 0}
     todo_online: list = []
 
     for r in rows:
@@ -264,18 +264,25 @@ def enrich_japanese(db, *, online: bool = True, max_online: int = 60) -> dict:
         except Exception as exc:  # noqa: BLE001
             logging.getLogger("trilingo").warning("LLM 补全失败: %s", exc)
 
+        # 逐个写入: 任何一个词出问题都不该中断其余的补全
         for r in todo_online:
-            zh = ai_done.get(r["word"])
-            source = "ai"
-            if not zh:
-                zh = translate_ja_zh(r["word"])
-                source = "auto"
-                time.sleep(0.4)     # 对公共接口保持礼貌
-            if zh:
-                db.set_enrich("jp", r["id"], sources={"meaning": source}, meaning=zh)
-                stats["ai" if source == "ai" else "online"] += 1
-            else:
-                stats["online_failed"] += 1
+            try:
+                zh = ai_done.get(r["word"])
+                source = "ai"
+                if not zh:
+                    zh = translate_ja_zh(r["word"])
+                    source = "auto"
+                    time.sleep(0.4)     # 对公共接口保持礼貌
+                if zh:
+                    db.set_enrich("jp", r["id"], sources={"meaning": source}, meaning=zh)
+                    key = "ai" if source == "ai" else "online"
+                    stats[key] = stats.get(key, 0) + 1
+                else:
+                    stats["online_failed"] = stats.get("online_failed", 0) + 1
+            except Exception as exc:  # noqa: BLE001
+                logging.getLogger("trilingo").warning(
+                    "补全 %s 失败: %s", r["word"], exc)
+                stats["online_failed"] = stats.get("online_failed", 0) + 1
     return stats
 
 

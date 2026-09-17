@@ -146,7 +146,8 @@ class MistakeFrame(tk.Frame):
             (today(), self.lang, wid),
         )
         self.app.db.conn.commit()
-        self.app.db.reset_plan(self.lang)
+        # 只把这一个词补进今日计划; 不能重建计划, 否则当天已答的记录会被清空
+        self.app.db.add_to_today(self.lang, wid)
         self.on_show()
         messagebox.showinfo("已加入", "该词已并入今日复习，进入词汇页即可看到。", parent=self)
 
@@ -157,5 +158,5 @@ class MistakeFrame(tk.Frame):
         if not messagebox.askyesno("确认", "确定要把该单词移出错题本吗？", parent=self):
             return
         self.app.db.remove_mistake(self.lang, wid)
-        self.app.db.reset_plan(self.lang)
+        self.app.db.remove_from_today(self.lang, wid)
         self.on_show()

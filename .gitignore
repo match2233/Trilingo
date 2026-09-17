@@ -8,6 +8,7 @@ trilingo.db-wal
 trilingo.db-shm
 trilingo.log
 *.log
+backups/
 
 # 除下面两个示例词表外，其余表格一律不提交（避免误传私人表格）
 *.xlsx

@@ -159,6 +159,22 @@ export async function syncNow() {
   return { state: merged, changed, sha: (newSha || '').slice(0, 8) };
 }
 
+/** 只拉取并合并到本地, **不上传**.
+
+ * 启动时用它: 既能让本机立刻看到另一台设备的进度, 又不会把本机尚存的
+ * 旧数据反推回云端 —— 重置进度时这一点很关键, 否则一端刚重置完, 另一端
+ * 一打开就把它推回来了。
+ */
+export async function pullOnly() {
+  if (!isConfigured()) return null;
+  const cfg = loadConfig();
+  const local = loadLocalState();
+  const { state: remote } = await pull(cfg);
+  const merged = merge(local, remote);
+  saveLocalState(merged);
+  return merged;
+}
+
 export async function testConnection(cfg) {
   const c = cfg || loadConfig();
   if (!c.token) return { ok: false, msg: '还没有填写访问令牌。' };

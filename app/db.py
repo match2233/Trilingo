@@ -550,6 +550,56 @@ class Database:
         self.conn.commit()
         return base
 
+    def reset_today(self, day: str | None = None) -> dict:
+        """清空"今天", 回到今天开始前的状态.
+
+        错题本是从事件流推导的, 删掉今天的事件就会自动回退。但快照 base 是在
+        今天作答**之后**才拍的, "复习答对 -> 档位 +1" 记在里面, 事件流里没有,
+        所以这一部分要照着当日计划的 kind='review' 逐条退回去。
+        """
+        from . import sync_core as sc
+
+        day = day or today()
+        base = self.get_base()
+
+        rolled = 0
+        for lang, table in (("en", "en_words"), ("jp", "jp_words")):
+            # 必须限定 answered=1: 计划里当天没做过的词也在表里,
+            # 不加这个条件会把它们的档位一并重置, 属于损坏数据。
+            rows = self.conn.execute(
+                f"SELECT w.word AS word, p.correct AS correct"
+                f" FROM daily_plan p JOIN {table} w ON w.id = p.word_id"
+                " WHERE p.day=? AND p.lang=? AND p.kind='review' AND p.answered=1",
+                (day, lang),
+            ).fetchall()
+            for r in rows:
+                m = base["mistakes"].get(f"{lang}:{r['word']}")
+                if not m or m.get("g"):
+                    continue
+                if r["correct"]:
+                    m["s"] = max(0, (m.get("s") or 0) - 1)
+                else:
+                    m["a"] = sc.add_days(day, -1)
+                    m["s"] = 0
+                rolled += 1
+
+        # 今天首答就错的词也会写进 base, 把 day0 挪回去让它重新到期
+        for m in base["mistakes"].values():
+            if m.get("a") == day and not m.get("g"):
+                m["a"] = sc.add_days(day, -1)
+                rolled += 1
+
+        base["days"] = [d for d in base.get("days", []) if d != day]
+        (base.get("done") or {}).pop(day, None)
+        self.set_base(base)
+
+        n_ev = self.conn.execute("DELETE FROM events WHERE day=?", (day,)).rowcount
+        self.conn.execute("DELETE FROM daily_plan WHERE day=?", (day,))
+        self.conn.execute("DELETE FROM daily_log WHERE day=?", (day,))
+        self.refresh_mistakes()
+        self.conn.commit()
+        return {"rolled": rolled, "events": n_ev}
+
     def _done_from_plan(self) -> dict:
         """每天每门语言已答多少题 —— 从当日计划统计."""
         out: dict[str, dict[str, int]] = {}

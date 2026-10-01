@@ -68,6 +68,9 @@ class SyncDialog(tk.Toplevel):
         self.btn_push = FlatButton(bar, "以本机覆盖云端", self._force_push, bg=theme.CARD,
                                    font=theme.f(10), padx=14, pady=7)
         self.btn_push.pack(side="left", padx=(0, 8))
+        self.btn_reset = FlatButton(bar, "重置今日进度", self._reset_today, bg=theme.CARD,
+                                    fg=theme.ERROR, font=theme.f(10), padx=14, pady=7)
+        self.btn_reset.pack(side="left", padx=(0, 8))
         FlatButton(bar, "关闭", self.destroy, bg=theme.CARD,
                    font=theme.f(10), padx=14, pady=7).pack(side="left")
 
@@ -127,6 +130,50 @@ class SyncDialog(tk.Toplevel):
                 r = ghsync.sync(self.app.db, device="pc")
                 ok, msg = True, (f"同步完成。事件 {r['events']} 条，错题 {r['mistakes']} 条，"
                                  f"打卡 {r['days']} 天。" + ("" if r["changed"] else "（无变化）"))
+            except Exception as exc:  # noqa: BLE001
+                ok, msg = False, str(exc)
+
+            def done():
+                self.status.configure(text=msg, fg=theme.SUCCESS if ok else theme.ERROR)
+                self._busy(False)
+                self.app.refresh_menu()
+            try:
+                self.after(0, done)
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _reset_today(self) -> None:
+        """清空今日记录并覆盖云端 —— 两件事一起做.
+
+        只清本机是没用的: 合并是求并集的, 云端会把当天的进度带回来。而只覆盖
+        云端也不够, 因为本机还留着。必须同时做, 且另一台设备要处于关闭状态,
+        否则它一联网就会把旧进度推回来。
+        """
+        self._apply()
+        if not ghsync.is_configured():
+            self.status.configure(text="请先填写令牌、用户名和仓库名。", fg=theme.ERROR)
+            return
+        if not messagebox.askyesno(
+            "确认重置今日进度",
+            "将清空本机的今日答题记录，并用重置后的状态覆盖云端。\n\n"
+            "请先完全关闭另一台设备上的 Trilingo，\n"
+            "否则它一联网就会把今天的旧进度重新推回来。\n\n确定继续吗？",
+            parent=self,
+        ):
+            return
+
+        self.status.configure(text="正在重置…", fg=theme.MUTED)
+        self._busy(True)
+
+        def worker():
+            try:
+                r = self.app.db.reset_today()
+                p = ghsync.push_state(self.app.db, message="reset today")
+                ok = True
+                msg = (f"今日已重置：回退 {r['rolled']} 条复习档位、"
+                       f"清除 {r['events']} 条答题记录，并已覆盖云端（{p['sha']}）。")
             except Exception as exc:  # noqa: BLE001
                 ok, msg = False, str(exc)
 

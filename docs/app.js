@@ -522,11 +522,12 @@ async function init() {
   refreshDerived();
   renderAll();
   showView('home');
-  // 启动时后台拉一次, 让手机上立刻能看到电脑端的进度
+  // 启动时后台拉一次, 让手机上立刻能看到电脑端的进度。
+  // 用 pullOnly 而不是完整同步: 只拉不推, 避免本机残留的旧数据被反推回云端。
   if (gh.isConfigured()) {
-    gh.syncNow()
-      .then((r) => { S.state = r.state; renderAll(); })
-      .catch(() => gh.markPending(true));
+    gh.pullOnly()
+      .then((st) => { if (st) { S.state = st; renderAll(); } })
+      .catch(() => {});
   }
 }
 

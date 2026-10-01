@@ -128,8 +128,11 @@ python Trilingo.pyw
 
 ## 手机端（PWA）与跨设备同步
 
-`web/` 下是一份功能相同的网页版，可添加到 iPhone 主屏幕，像原生应用一样全屏运行，
+`docs/` 下是一份功能相同的网页版，可添加到 iPhone 主屏幕，像原生应用一样全屏运行，
 离线也能背单词。它与电脑端共享进度：手机上完成今日训练，电脑端即显示已完成，反之亦然。
+
+> 目录名叫 `docs` 是因为 **GitHub Pages 只允许从仓库根目录或 `/docs` 发布**，
+> 不能指定任意文件夹。这是 GitHub 的约定，与本项目文档无关。
 
 ### 同步原理
 
@@ -160,7 +163,7 @@ python Trilingo.pyw
 ### 部署网页版（GitHub Pages，免费）
 
 仓库 Settings → Pages → Source 选 `Deploy from a branch`，
-Branch 选 `main`、目录选 `/web`，保存。几分钟后访问：
+Branch 选 `main`、目录选 **`/docs`**，保存。几分钟后访问：
 
 ```
 https://<用户名>.github.io/Trilingo/
@@ -190,9 +193,19 @@ trilingo/
 │   ├─ ipa.py              ARPAbet 转美式 IPA
 │   ├─ enrich.py           音标、释义、声调补全
 │   ├─ llm.py              AI 释义补全（OpenAI 兼容接口）
+│   ├─ sync_core.py        同步状态格式、合并与推导
+│   ├─ ghsync.py           通过 GitHub 私有仓库同步
 │   ├─ sync.py             启动同步
 │   ├─ main.py             入口逻辑
 │   └─ ui/                 界面
+├─ docs/                   手机端 PWA（GitHub Pages 从该目录发布）
+│   ├─ index.html          页面结构
+│   ├─ app.js              界面与测验逻辑
+│   ├─ core.js             同步核心（与 app/sync_core.py 等价）
+│   ├─ gh.js               GitHub 同步客户端
+│   ├─ style.css           样式（含 iOS 安全区与深色模式）
+│   ├─ sw.js               Service Worker，离线可用
+│   └─ manifest.webmanifest
 └─ data/
     ├─ ja_seed.json        日语释义内置词表
     ├─ 词汇英.xlsx          词表格式示例

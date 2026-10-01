@@ -2,6 +2,9 @@
 # 里面是明文 API key，一旦推上去几分钟内就会被爬走盗刷
 data/llm.json
 
+# GitHub 同步令牌（可读写你的私有数据仓库）
+data/sync.json
+
 # ── 个人学习数据 ──────────────────────────────────
 trilingo.db
 trilingo.db-wal

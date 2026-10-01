@@ -56,6 +56,8 @@ def main() -> int:
         log.info("同步完成: %s", stats)
         app.set_enrich_notice(sync_mod.summarize(stats))
         app.refresh_menu()
+        # 词表就绪后再做跨设备同步, 保证手机端拿到的是最新的词
+        app.auto_sync(on_done=app.refresh_menu)
 
     # 每次打开应用都重新读取两个 xlsx, 补全缺失内容 (后台线程, 不阻塞界面)
     sync_mod.startup_sync_async(db, app, on_sync_done)

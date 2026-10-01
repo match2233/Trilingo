@@ -28,6 +28,7 @@ class TrilingoApp(tk.Tk):
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self._enrich_notice: str = ""
+        self._sync_notice: str = ""
 
         self.show("menu")
 
@@ -81,6 +82,40 @@ class TrilingoApp(tk.Tk):
 
     def set_enrich_notice(self, text: str) -> None:
         self._enrich_notice = text
+        f = self._frames.get("menu")
+        if isinstance(f, MenuFrame):
+            f.on_show()
+
+    # ------------------------------------------------------------ 同步
+    def auto_sync(self, on_done=None) -> None:
+        """后台静默同步一次. 未配置或失败都不打扰用户, 只记日志."""
+        from .. import ghsync
+
+        if not ghsync.is_configured():
+            return
+
+        import logging
+        import threading
+
+        log = logging.getLogger("trilingo")
+
+        def worker():
+            try:
+                r = ghsync.sync(self.db, device="pc")
+                log.info("自动同步完成: %s", r)
+                msg = f"同步完成 · 事件 {r['events']} · 错题 {r['mistakes']} · 打卡 {r['days']} 天"
+            except Exception as exc:  # noqa: BLE001
+                log.warning("自动同步失败: %s", exc)
+                msg = f"同步失败：{exc}"
+            try:
+                self.after(0, lambda: (self.set_sync_notice(msg), on_done and on_done()))
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def set_sync_notice(self, text: str) -> None:
+        self._sync_notice = text
         f = self._frames.get("menu")
         if isinstance(f, MenuFrame):
             f.on_show()
@@ -169,8 +204,22 @@ class MenuFrame(tk.Frame):
         bottom.pack(fill="x", padx=34, pady=(4, 22))
         self.notice = tk.Label(bottom, text="", bg=theme.BG, fg=theme.MUTED, font=theme.f(9))
         self.notice.pack(anchor="w", pady=(0, 6))
-        FlatButton(bottom, "数据库", lambda: self.app.show("database"),
-                   bg=theme.CARD, fg=theme.TEXT, font=theme.f(12), pady=12).pack(fill="x")
+
+        row = tk.Frame(bottom, bg=theme.BG)
+        row.pack(fill="x")
+        FlatButton(row, "数据库", lambda: self.app.show("database"),
+                   bg=theme.CARD, fg=theme.TEXT, font=theme.f(12), pady=12).pack(
+            side="left", fill="x", expand=True)
+        self.sync_btn = FlatButton(row, "同步", self._open_sync, bg=theme.CARD,
+                                   fg=theme.TEXT, font=theme.f(12), pady=12, padx=26)
+        self.sync_btn.pack(side="left", padx=(10, 0))
+
+    def _open_sync(self) -> None:
+        from .sync_settings import SyncDialog
+
+        dlg = SyncDialog(self, self.app)
+        self.wait_window(dlg)
+        self.on_show()
 
     def _quad(self, parent, r, c, title, sub, color, soft, cmd) -> FlatButton:
         card = Card(parent)
@@ -211,4 +260,12 @@ class MenuFrame(tk.Frame):
             else:
                 btn.set_subtitle(f"{n} 个错词")
 
-        self.notice.configure(text=self.app._enrich_notice)
+        # 同步状态优先显示, 方便一眼看出手机端的数据有没有拉过来
+        parts = [t for t in (self.app._sync_notice, self.app._enrich_notice) if t]
+        self.notice.configure(text="　·　".join(parts))
+        if self.app._sync_notice.startswith("同步失败"):
+            self.sync_btn.set_subtitle("点击查看")
+        else:
+            from .. import ghsync
+
+            self.sync_btn.set_subtitle("已开启" if ghsync.is_configured() else "未设置")

@@ -126,6 +126,54 @@ python Trilingo.pyw
   也可改用环境变量 `DEEPSEEK_API_KEY` 而不写入文件
 * 不配置时自动退回免费翻译接口
 
+## 手机端（PWA）与跨设备同步
+
+`web/` 下是一份功能相同的网页版，可添加到 iPhone 主屏幕，像原生应用一样全屏运行，
+离线也能背单词。它与电脑端共享进度：手机上完成今日训练，电脑端即显示已完成，反之亦然。
+
+### 同步原理
+
+数据存放在一个 **GitHub 私有仓库**的 `state.json` 中，两台设备各自「拉取 → 合并 → 回传」。
+
+* **事件流而非快照**：每答一题追加一条 `{时间, 语言, 单词, 对错}`。合并就是按 id 求并集，
+  因此一端先操作也不会覆盖掉另一端的记录；错题本、复习排期、打卡天数全部由事件推导
+* **每日抽词是确定性纯函数**：按 `fnv1a(日期|语言|单词)` 排序取前 N 个，
+  两台设备算出的当日计划必然一致，计划本身无需同步
+* **冲突处理**：提交时带 `sha` 作乐观锁，被另一端改过会返回 409，此时重新拉取合并再提交。
+  合并满足交换律，重试一定收敛
+* 无需服务器，无任何费用。纯文本 JSON，单次同步约几十 KB
+
+### 一次性配置
+
+1. 新建一个**私有**仓库存放数据，例如 `Trilingo-data`（建议勾选 Add a README 以初始化）
+2. 生成访问令牌：GitHub → Settings → Developer settings → Personal access tokens →
+   **Fine-grained tokens** → Generate new token
+   * Repository access 选 **Only select repositories**，只勾 `Trilingo-data`
+   * Permissions → Repository permissions → **Contents** 设为 **Read and write**
+   * 其余权限全部保持 No access
+3. 电脑端：【同步】→ 填入令牌、用户名、数据仓库名 → 【测试连接】→【立即同步】
+4. 手机端：安装 PWA 后，在【同步】页填入同样的三项 → 【立即同步】
+
+> 令牌只保存在本机（`data/sync.json`，已 gitignore），不会上传到任何地方。
+> 万一泄露，由于它是细粒度令牌且只对一个仓库有读写权，影响范围有限；仍应立即吊销重建。
+
+### 部署网页版（GitHub Pages，免费）
+
+仓库 Settings → Pages → Source 选 `Deploy from a branch`，
+Branch 选 `main`、目录选 `/web`，保存。几分钟后访问：
+
+```
+https://<用户名>.github.io/Trilingo/
+```
+
+### 安装到 iPhone
+
+1. 用 **Safari** 打开上面的地址（iOS 上只有 Safari 能添加到主屏幕）
+2. 点底部分享按钮 → **添加到主屏幕**
+3. 之后从主屏幕图标启动即可全屏运行
+
+> iPhone 必须能访问 GitHub，否则页面打不开。若使用代理，请确认 Safari 也走代理。
+
 ## 目录结构
 
 ```

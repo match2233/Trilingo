@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import sqlite3
 from pathlib import Path
 
@@ -89,6 +90,20 @@ CREATE TABLE IF NOT EXISTS daily_log (
 );
 
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
+
+-- 答题事件流: 跨设备同步的唯一真相
+-- 用单词字符串而非自增 id 作键, 这样两台设备的事件可以直接合并
+CREATE TABLE IF NOT EXISTS events (
+    id     TEXT PRIMARY KEY,
+    ts     INTEGER NOT NULL,
+    device TEXT NOT NULL DEFAULT 'pc',
+    lang   TEXT NOT NULL,
+    word   TEXT NOT NULL,
+    ok     INTEGER NOT NULL,
+    day    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_events_day ON events(day);
+CREATE INDEX IF NOT EXISTS idx_events_word ON events(lang, word);
 """
 
 
@@ -303,50 +318,61 @@ class Database:
         self.conn.commit()
 
     # ------------------------------------------------------------ 错题本
+    def refresh_mistakes(self) -> None:
+        """按事件流重建错题本表.
+
+        mistakes 表是**派生缓存**, 真相在事件流里。每次作答后重建, 才能保证
+        「表里有的」和「推导出来的」永远一致 —— 否则旧代码路径写表、新代码路径
+        写事件, 两边会分家, 表现为"错题到期了却不出现"。
+        """
+        der = self.derived_state()
+        ids: dict[str, int] = {}
+        for lang, table in (("en", "en_words"), ("jp", "jp_words")):
+            for r in self.conn.execute(f"SELECT id, word FROM {table}"):
+                ids[f"{lang}:{r['word']}"] = r["id"]
+
+        self.conn.execute("DELETE FROM mistakes")
+        from .sync_core import next_due
+
+        for key, m in der["mistakes"].items():
+            wid = ids.get(key)
+            if wid is None:
+                continue
+            lang, _ = key.split(":", 1)
+            self.conn.execute(
+                "INSERT INTO mistakes (lang,word_id,anchor_date,stage,next_due,"
+                "graduated,error_count,last_error_at,created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
+                (lang, wid, m["a"], m["s"], next_due(m) or "",
+                 1 if m.get("g") else 0, m.get("e", 0), "", _now()),
+            )
+
     def record_wrong(self, lang: str, word_id: int, wrong_input: str = "") -> None:
-        """答错: day0 = 今天, 重置整个复习阶梯."""
-        day = today()
+        """答错. 记一条事件, 错题本与排期由事件流推导."""
+        table = "en_words" if lang == "en" else "jp_words"
+        row = self.conn.execute(f"SELECT word FROM {table} WHERE id=?", (word_id,)).fetchone()
+        if row is None:
+            return
         self.conn.execute(
             "INSERT INTO mistake_events (lang,word_id,at,wrong_input) VALUES (?,?,?,?)",
             (lang, word_id, _now(), wrong_input),
         )
-        row = self.conn.execute(
-            "SELECT * FROM mistakes WHERE lang=? AND word_id=?", (lang, word_id)
-        ).fetchone()
-        nxt = add_days(day, REVIEW_OFFSETS[0])
-        if row is None:
-            self.conn.execute(
-                "INSERT INTO mistakes (lang,word_id,anchor_date,stage,next_due,graduated,"
-                "error_count,last_error_at,created_at) VALUES (?,?,?,0,?,0,1,?,?)",
-                (lang, word_id, day, nxt, _now(), _now()),
-            )
-        else:
-            self.conn.execute(
-                "UPDATE mistakes SET anchor_date=?, stage=0, next_due=?, graduated=0,"
-                " error_count=error_count+1, last_error_at=? WHERE id=?",
-                (day, nxt, _now(), row["id"]),
-            )
+        self.add_event(lang, row["word"], False)
+        self.refresh_mistakes()
         self.conn.commit()
 
     def record_review_pass(self, lang: str, word_id: int) -> None:
-        """错题复习答对: 推进到下一档; 走完 day+30 则毕业."""
-        row = self.conn.execute(
-            "SELECT * FROM mistakes WHERE lang=? AND word_id=?", (lang, word_id)
-        ).fetchone()
-        if row is None or row["graduated"]:
+        """错题复习答对. 同样记事件, 推进/毕业由推导决定."""
+        table = "en_words" if lang == "en" else "jp_words"
+        row = self.conn.execute(f"SELECT word FROM {table} WHERE id=?", (word_id,)).fetchone()
+        if row is None:
             return
-        stage = row["stage"] + 1
-        if stage >= len(REVIEW_OFFSETS):
-            # 5 档全部通过 => 30 天内没有再错, 移出错题本
-            self.conn.execute(
-                "UPDATE mistakes SET stage=?, graduated=1, next_due='' WHERE id=?",
-                (stage, row["id"]),
-            )
-        else:
-            nxt = add_days(row["anchor_date"], REVIEW_OFFSETS[stage])
-            self.conn.execute(
-                "UPDATE mistakes SET stage=?, next_due=? WHERE id=?", (stage, nxt, row["id"])
-            )
+        key = f"{lang}:{row['word']}"
+        m = self.derived_state()["mistakes"].get(key)
+        if not m or m.get("g"):
+            return
+        self.add_event(lang, row["word"], True)
+        self.refresh_mistakes()
         self.conn.commit()
 
     def due_mistakes(self, lang: str, day: str | None = None) -> list[sqlite3.Row]:
@@ -380,8 +406,31 @@ class Database:
         self.conn.commit()
 
     # ------------------------------------------------------------ 每日计划
+    def derived_state(self) -> dict:
+        """从 base + 本地事件推导当前状态.
+
+        与手机端用的是同一套算法 (sync_core), 因此两台设备对"今天该考哪些词"
+        的判断必然一致。
+        """
+        from . import sync_core as sc
+
+        state = sc.empty_state()
+        state["base"] = self.get_base()
+        state["events"] = [
+            dict(r) for r in self.conn.execute(
+                "SELECT id AS i, ts AS t, device AS d, lang AS l, word AS w, ok AS o, day FROM events"
+            )
+        ]
+        return sc.derive(state)
+
     def ensure_plan(self, lang: str, day: str | None = None) -> list[sqlite3.Row]:
-        """生成/读取当天的学习清单: 新词 + 到期错题复习."""
+        """生成/读取当天的学习清单: 新词 + 到期错题复习.
+
+        抽词是**确定性**的 (按 fnv1a(日期|语言|单词) 排序取前 N 个),
+        所以电脑和手机各自算出的当日计划完全相同, 计划本身不需要同步。
+        """
+        from . import sync_core as sc
+
         day = day or today()
         have = self.conn.execute(
             "SELECT COUNT(*) c FROM daily_plan WHERE day=? AND lang=?", (day, lang)
@@ -390,36 +439,20 @@ class Database:
             return self.plan(lang, day)
 
         table = "en_words" if lang == "en" else "jp_words"
-        target = EN_DAILY_NEW if lang == "en" else JP_DAILY_NEW
+        words = [{"w": r["word"]} for r in
+                 self.conn.execute(f"SELECT word FROM {table} WHERE active=1")]
+        chosen = sc.plan_for(day, lang, words, self.derived_state())
 
-        # 1) 到期错题 —— 必须出现
-        due = self.due_mistakes(lang, day)
-        chosen: list[tuple[int, str]] = [(r["word_id"], "review") for r in due]
-
-        # 2) 新词: 优先从未学过的, 不足时用最久没复习的补足
-        exclude = {wid for wid, _ in chosen}
-        rows = self.conn.execute(
-            f"SELECT id, times_studied, last_studied FROM {table} WHERE active=1"
-        ).fetchall()
-        fresh = [r["id"] for r in rows if r["id"] not in exclude and r["times_studied"] == 0]
-        old = sorted(
-            (r for r in rows if r["id"] not in exclude and r["times_studied"] > 0),
-            key=lambda r: (r["last_studied"] or "", r["id"]),
-        )
-        import random
-
-        random.shuffle(fresh)
-        need = max(0, target - len([c for c in chosen if c[1] == "new"]))
-        picks = fresh[:need]
-        if len(picks) < need:
-            picks += [r["id"] for r in old[: need - len(picks)]]
-        chosen += [(wid, "new") for wid in picks]
-
-        for seq, (wid, kind) in enumerate(chosen):
+        id_of = {r["word"]: r["id"] for r in
+                 self.conn.execute(f"SELECT id, word FROM {table}")}
+        for seq, c in enumerate(chosen):
+            wid = id_of.get(c["w"])
+            if wid is None:
+                continue
             self.conn.execute(
                 "INSERT OR IGNORE INTO daily_plan (day,lang,word_id,kind,seq)"
                 " VALUES (?,?,?,?,?)",
-                (day, lang, wid, kind, seq),
+                (day, lang, wid, c["kind"], seq),
             )
         self._refresh_log(lang, day)
         self.conn.commit()
@@ -435,9 +468,11 @@ class Database:
             (day, lang),
         ).fetchall()
 
-    def mark_answered(self, lang: str, word_id: int, correct: bool, day: str | None = None) -> None:
+    def mark_answered(self, lang: str, word_id: int, correct: bool, day: str | None = None,
+                      device: str = "pc") -> None:
         day = day or today()
         table = "en_words" if lang == "en" else "jp_words"
+        row = self.conn.execute(f"SELECT word FROM {table} WHERE id=?", (word_id,)).fetchone()
         self.conn.execute(
             "UPDATE daily_plan SET answered=1, correct=? WHERE day=? AND lang=? AND word_id=?",
             (1 if correct else 0, day, lang, word_id),
@@ -446,7 +481,179 @@ class Database:
             f"UPDATE {table} SET times_studied=times_studied+1, last_studied=? WHERE id=?",
             (day, word_id),
         )
+        if row:
+            self.add_event(lang, row["word"], correct, day, device)
+            self.refresh_mistakes()      # 错题本是派生缓存, 随事件流刷新
         self._refresh_log(lang, day)
+        self.conn.commit()
+
+    # ------------------------------------------------------------ 事件流
+    def add_event(self, lang: str, word: str, ok: bool, day: str | None = None,
+                  device: str = "pc") -> None:
+        """记录一次作答. 跨设备同步以事件流为准, 错题本与打卡由它推导.
+
+        时间戳用**毫秒**: 连续答题常常落在同一秒内, 用秒级时间戳会让事件
+        顺序退化成按 id (随机) 排, 于是"答错重置"和"复习推进"的先后会被打乱。
+        id 再带上时间前缀, 同一毫秒内也能确定性排序。
+        """
+        import uuid
+
+        day = day or today()
+        ts = int(dt.datetime.now().timestamp() * 1000)
+        eid = f"{ts:013d}{uuid.uuid4().hex[:8]}"
+        self.conn.execute(
+            "INSERT OR IGNORE INTO events (id,ts,device,lang,word,ok,day) VALUES (?,?,?,?,?,?,?)",
+            (eid, ts, device, lang, word, 1 if ok else 0, day),
+        )
+
+    def import_events(self, events: list[dict]) -> int:
+        """把远端事件并入本地, 已存在的按 id 跳过."""
+        n = 0
+        for e in events:
+            cur = self.conn.execute(
+                "INSERT OR IGNORE INTO events (id,ts,device,lang,word,ok,day)"
+                " VALUES (?,?,?,?,?,?,?)",
+                (e.get("i"), e.get("t", 0), e.get("d", "?"), e.get("l", ""),
+                 e.get("w", ""), 1 if e.get("o") else 0, e.get("day", "")),
+            )
+            n += cur.rowcount
+        self.conn.commit()
+        return n
+
+    # ------------------------------------------------------------ 同步用
+    def get_base(self) -> dict:
+        """同步基准. 首次调用时做一次引导快照, 之后冻结、只由压缩更新.
+
+        引导时必须同时清空已有事件: 快照读的是**当前**错题本, 里面已经包含
+        了那些事件的效果。若不清空, 推导时会把它们再叠加一遍 —— 错一次的
+        词会变成错两次。
+        """
+        from . import sync_core as sc
+
+        raw = self.meta_get("sync_base", "")
+        if raw:
+            try:
+                return json.loads(raw)
+            except Exception:
+                pass
+
+        base = sc.build_base_from_db(self)
+        self.meta_set("sync_base", json.dumps(base, ensure_ascii=False))
+        # 已有事件的效果已并入 base, 从事件表移除以免重复计入
+        self.conn.execute("DELETE FROM events")
+        self.conn.commit()
+        return base
+
+    def set_base(self, base: dict) -> None:
+        self.meta_set("sync_base", json.dumps(base, ensure_ascii=False))
+
+    def get_edits(self) -> dict:
+        """人工改过的词条 —— 同步时优先级最高, 不会被自动内容覆盖."""
+        edits: dict[str, dict] = {}
+        for r in self.conn.execute(
+            "SELECT word,meaning,ipa,meaning_source,ipa_source FROM en_words"
+        ):
+            if r["meaning_source"] != "manual" and r["ipa_source"] != "manual":
+                continue
+            e: dict = {}
+            if r["meaning_source"] == "manual":
+                e["m"] = r["meaning"]
+            if r["ipa_source"] == "manual":
+                e["ipa"] = r["ipa"]
+            edits[f"en:{r['word']}"] = e
+        for r in self.conn.execute(
+            "SELECT word,reading,meaning,accent,meaning_source,accent_source FROM jp_words"
+        ):
+            if r["meaning_source"] != "manual" and r["accent_source"] != "manual":
+                continue
+            e = {}
+            if r["meaning_source"] == "manual":
+                e["m"] = r["meaning"]
+            if r["accent_source"] == "manual":
+                e["ac"] = r["accent"]
+            if r["reading"]:
+                e["r"] = r["reading"]
+            edits[f"jp:{r['word']}"] = e
+        return edits
+
+    def apply_synced_en(self, rec: dict) -> None:
+        self._apply_synced("en_words", "word", rec, {"m": "meaning", "ipa": "ipa"})
+
+    def apply_synced_jp(self, rec: dict) -> None:
+        self._apply_synced("jp_words", "word", rec,
+                           {"m": "meaning", "ac": "accent", "r": "reading"})
+
+    def _apply_synced(self, table: str, key: str, rec: dict, mapping: dict) -> None:
+        """把同步来的字段写入本地词条. 本地人工编辑过的不覆盖."""
+        row = self.conn.execute(f"SELECT * FROM {table} WHERE {key}=?", (rec.get("w"),)).fetchone()
+        if row is None:
+            return
+        sets, params = [], []
+        for src, col in mapping.items():
+            val = rec.get(src)
+            if val in (None, ""):
+                continue
+            if col in ("meaning", "accent") and row[f"{col}_source"] == "manual":
+                continue
+            if row[col] == val:
+                continue
+            sets.append(f"{col}=?")
+            params.append(val)
+        if sets:
+            sets.append("updated_at=?")
+            params += [_now(), row["id"]]
+            self.conn.execute(f"UPDATE {table} SET {','.join(sets)} WHERE id=?", params)
+            self.conn.commit()
+
+    def rebuild_from_state(self, der: dict) -> None:
+        """按推导结果重建错题本、学习统计与打卡记录.
+
+        词表与人工编辑不动 —— 那些由 apply_synced_* 单独处理。
+        """
+        # 单词 -> id 映射
+        ids: dict[str, int] = {}
+        for lang, table in (("en", "en_words"), ("jp", "jp_words")):
+            for r in self.conn.execute(f"SELECT id, word FROM {table}"):
+                ids[f"{lang}:{r['word']}"] = r["id"]
+
+        # 1) 错题本
+        self.conn.execute("DELETE FROM mistakes")
+        for key, m in der["mistakes"].items():
+            lang, word = key.split(":", 1)
+            wid = ids.get(key)
+            if wid is None:
+                continue
+            from .sync_core import next_due
+
+            due = next_due(m) or ""
+            self.conn.execute(
+                "INSERT INTO mistakes (lang,word_id,anchor_date,stage,next_due,"
+                "graduated,error_count,last_error_at,created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
+                (lang, wid, m["a"], m["s"], due, 1 if m.get("g") else 0,
+                 m.get("e", 0), "", _now()),
+            )
+
+        # 2) 最后学习日
+        for key, day in der["stats"].items():
+            lang, word = key.split(":", 1)
+            table = "en_words" if lang == "en" else "jp_words"
+            self.conn.execute(
+                f"UPDATE {table} SET last_studied=? WHERE word=? AND"
+                " (last_studied IS NULL OR last_studied<?)",
+                (day, word, day),
+            )
+
+        # 3) 打卡(完成)日期
+        self.conn.execute("DELETE FROM daily_log WHERE completed=1")
+        for day in sorted(der["days"]):
+            for lang in ("en", "jp"):
+                self.conn.execute(
+                    "INSERT INTO daily_log (day,lang,total,answered,correct,completed)"
+                    " VALUES (?,?,0,0,0,1)"
+                    " ON CONFLICT(day,lang) DO UPDATE SET completed=1",
+                    (day, lang),
+                )
         self.conn.commit()
 
     def _refresh_log(self, lang: str, day: str) -> None:
@@ -549,21 +756,14 @@ class Database:
 
     # ------------------------------------------------------------ 打卡
     def streak(self) -> int:
-        """连续打卡天数 (完成当天任一门语言的全部单词即算打卡)."""
-        rows = self.conn.execute(
-            "SELECT DISTINCT day FROM daily_log WHERE completed=1 ORDER BY day DESC"
-        ).fetchall()
-        days = {r["day"] for r in rows}
-        if not days:
-            return 0
-        t = dt.date.today()
-        # 今天还没学完不算断签, 从昨天起算
-        cur = t if t.isoformat() in days else t - dt.timedelta(days=1)
-        n = 0
-        while cur.isoformat() in days:
-            n += 1
-            cur -= dt.timedelta(days=1)
-        return n
+        """连续打卡天数.
+
+        与手机端同源: 从事件流推导 (当天任一门语言答满该语言目标题数即算打卡),
+        而不是读 daily_log —— 否则两台设备会得出不同的天数。
+        """
+        from . import sync_core as sc
+
+        return sc.streak(self.derived_state()["days"])
 
     def today_status(self, lang: str, day: str | None = None) -> tuple[int, int]:
         day = day or today()

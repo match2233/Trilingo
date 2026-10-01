@@ -155,6 +155,8 @@ class QuizFrame(tk.Frame):
 
     def _go_back(self) -> None:
         self.cancel_timers()
+        # 离开时推一次: 让手机端尽快看到电脑这边的进度
+        self.app.auto_sync()
         self.app.refresh_menu()
         self.app.show("menu")
 
@@ -226,12 +228,10 @@ class QuizFrame(tk.Frame):
         self.revealed = True
         self.entry.configure(state="disabled")
 
+        # 只调这一个: 它记一条事件, 错题本与复习排期都由事件流推导出来。
+        # 不能再额外调 record_wrong/record_review_pass —— 那样一次作答会产生
+        # 两条事件, 出错次数和档位都会翻倍。
         self.app.db.mark_answered(self.lang, w["word_id"], ok)
-        if ok:
-            if w["kind"] == "review":
-                self.app.db.record_review_pass(self.lang, w["word_id"])
-        else:
-            self.app.db.record_wrong(self.lang, w["word_id"], raw)
 
         self._show_result(ok, w)
         answered, total = self.app.db.today_status(self.lang)

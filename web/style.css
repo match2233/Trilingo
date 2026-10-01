@@ -1,0 +1,264 @@
+/* Trilingo PWA —— 面向 iPhone 的布局与配色，沿用桌面端的主色 */
+
+:root {
+  --bg: #f4f5f9;
+  --card: #ffffff;
+  --border: #e3e5ee;
+  --text: #1f2430;
+  --muted: #7a8194;
+  --primary: #e8622c;
+  --primary-dark: #c94e1d;
+  --blue: #4a6cf7;
+  --success: #1f9d55;
+  --success-soft: #e8f7ee;
+  --error: #d64545;
+  --error-soft: #fcecec;
+  --radius: 14px;
+
+  /* iPhone 刘海/底部横条的安全区 */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161c;
+    --card: #1d2029;
+    --border: #2c303c;
+    --text: #e9ebf2;
+    --muted: #8b93a7;
+    --primary: #ff7a45;
+    --primary-dark: #e8622c;
+    --blue: #7b93ff;
+    --success: #4ec27a;
+    --success-soft: #1b2f24;
+    --error: #ff6b6b;
+    --error-soft: #33201f;
+  }
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans",
+               "Microsoft YaHei", sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  overscroll-behavior-y: none;
+}
+
+/* 苹果的惯性滚动与禁止双击缩放 */
+body { touch-action: manipulation; }
+.scroll { -webkit-overflow-scrolling: touch; }
+
+/* ------------------------------------------------------------------ 结构 */
+#app {
+  padding-top: var(--safe-top);
+  padding-bottom: calc(58px + var(--safe-bottom));
+  min-height: 100vh;
+}
+
+.view { display: none; padding: 16px; }
+.view.active { display: block; }
+
+h1 { font-size: 22px; margin: 4px 0 2px; }
+h2 { font-size: 17px; margin: 18px 0 8px; color: var(--muted); font-weight: 600; }
+.sub { color: var(--muted); font-size: 13px; margin: 0; }
+
+/* ------------------------------------------------------------------ 卡片 */
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+
+.streak {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.streak .num { font-size: 26px; font-weight: 700; color: var(--primary); }
+.streak .lbl { font-size: 12px; color: var(--muted); }
+
+/* 首页两行两列 */
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.tile {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px 12px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  min-height: 108px;
+}
+.tile:active { background: var(--bg); }
+.tile .t { font-size: 19px; font-weight: 700; }
+.tile .d { font-size: 12px; color: var(--muted); }
+.tile.en .t { color: var(--primary); }
+.tile.err .t { color: var(--blue); }
+.tile.done { border-color: var(--success); background: var(--success-soft); }
+
+/* ------------------------------------------------------------------ 按钮 */
+button {
+  font-family: inherit;
+  font-size: 16px;
+  border: none;
+  border-radius: 12px;
+  padding: 13px 18px;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+button.primary {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+  font-weight: 600;
+}
+button.primary:active { background: var(--primary-dark); }
+button:active { opacity: .85; }
+button:disabled { opacity: .45; }
+.btn-row { display: flex; gap: 10px; margin-top: 14px; }
+.btn-row button { flex: 1; }
+
+/* ------------------------------------------------------------------ 测验 */
+#quiz { display: none; }
+#quiz.active { display: flex; flex-direction: column; }
+
+.quiz-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+  padding-top: calc(10px + var(--safe-top));
+}
+.quiz-head .title { font-weight: 600; flex: 1; }
+.quiz-head .back { padding: 6px 12px; font-size: 15px; }
+
+.bar { height: 3px; background: var(--border); }
+.bar > i { display: block; height: 100%; background: var(--primary); width: 0; transition: width .25s; }
+
+.quiz-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 24px 20px;
+  gap: 22px;
+  text-align: center;
+}
+.meaning { font-size: 27px; font-weight: 700; line-height: 1.35; }
+.badge { font-size: 12px; color: var(--muted); }
+.badge.review { color: var(--primary); font-weight: 600; }
+
+/* 字号 ≥16px, 否则 iOS 聚焦时会自动放大页面 */
+input[type="text"], input[type="search"], input[type="password"] {
+  font-family: inherit;
+  font-size: 21px;
+  width: 100%;
+  padding: 14px;
+  text-align: center;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text);
+}
+input:focus { outline: none; border-color: var(--primary); }
+input.ok { border-color: var(--success); }
+input.bad { border-color: var(--error); }
+
+.result { min-height: 76px; display: flex; flex-direction: column; gap: 6px; justify-content: center; }
+.result .main { font-size: 16px; font-weight: 600; }
+.result .ipa { font-size: 22px; }
+.result .hint { font-size: 13px; color: var(--muted); }
+.ok-text { color: var(--success); }
+.bad-text { color: var(--error); }
+
+/* ------------------------------------------------------------------ 列表 */
+.list { margin-top: 10px; }
+.row {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+.row .r1 { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.row .w { font-weight: 600; font-size: 17px; }
+.row .meta { font-size: 12px; color: var(--muted); }
+.row .m { font-size: 14px; color: var(--muted); margin-top: 3px; }
+.row.due { border-left: 3px solid var(--error); }
+.row .tag {
+  font-size: 11px; padding: 2px 8px; border-radius: 20px;
+  background: var(--bg); color: var(--muted);
+}
+.row .tag.hot { background: var(--error-soft); color: var(--error); }
+
+.seg {
+  display: flex; background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; overflow: hidden; margin: 10px 0;
+}
+.seg button {
+  flex: 1; border: none; border-radius: 0; background: transparent;
+  padding: 9px; font-size: 14px; color: var(--muted);
+}
+.seg button.on { background: var(--primary); color: #fff; font-weight: 600; }
+
+.empty { text-align: center; color: var(--muted); padding: 40px 20px; font-size: 14px; }
+
+/* ------------------------------------------------------------------ 底部导航 */
+#tabs {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  display: flex;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  padding-bottom: var(--safe-bottom);
+  z-index: 20;
+}
+#tabs button {
+  flex: 1; border: none; border-radius: 0; background: transparent;
+  color: var(--muted); font-size: 11px; padding: 8px 0 10px;
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+}
+#tabs button .ic { font-size: 20px; line-height: 1; }
+#tabs button.on { color: var(--primary); }
+
+/* ------------------------------------------------------------------ 提示条 */
+#toast {
+  position: fixed;
+  left: 50%; transform: translateX(-50%);
+  bottom: calc(70px + var(--safe-bottom));
+  background: rgba(0,0,0,.82);
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 22px;
+  font-size: 14px;
+  max-width: 88%;
+  text-align: center;
+  opacity: 0;
+  transition: opacity .25s;
+  pointer-events: none;
+  z-index: 40;
+}
+#toast.show { opacity: 1; }
+
+.offline {
+  background: var(--error-soft); color: var(--error);
+  font-size: 12px; padding: 7px 12px; border-radius: 10px; margin-bottom: 10px;
+}

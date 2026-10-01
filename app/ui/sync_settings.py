@@ -65,6 +65,9 @@ class SyncDialog(tk.Toplevel):
                                    hover=theme.PRIMARY_DARK, active_bg=theme.PRIMARY_DARK,
                                    font=theme.f(10, "bold"), padx=18, pady=7)
         self.btn_sync.pack(side="left", padx=(0, 8))
+        self.btn_push = FlatButton(bar, "以本机覆盖云端", self._force_push, bg=theme.CARD,
+                                   font=theme.f(10), padx=14, pady=7)
+        self.btn_push.pack(side="left", padx=(0, 8))
         FlatButton(bar, "关闭", self.destroy, bg=theme.CARD,
                    font=theme.f(10), padx=14, pady=7).pack(side="left")
 
@@ -131,6 +134,44 @@ class SyncDialog(tk.Toplevel):
                 self.status.configure(text=msg, fg=theme.SUCCESS if ok else theme.ERROR)
                 self._busy(False)
                 self.app.refresh_menu()
+            try:
+                self.after(0, done)
+            except Exception:
+                pass
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _force_push(self) -> None:
+        """用本机状态覆盖云端.
+
+        普通同步是求并集, 本机删掉的进度会被云端带回来; 重置后要让云端也回到
+        重置后的状态, 只能用这个。
+        """
+        self._apply()
+        if not ghsync.is_configured():
+            self.status.configure(text="请先填写令牌、用户名和仓库名。", fg=theme.ERROR)
+            return
+        if not messagebox.askyesno(
+            "确认覆盖云端",
+            "将用本机状态覆盖云端数据，不做合并。\n\n"
+            "另一台设备上尚未同步的进度会丢失。\n\n确定继续吗？",
+            parent=self,
+        ):
+            return
+
+        self.status.configure(text="正在覆盖云端…", fg=theme.MUTED)
+        self._busy(True)
+
+        def worker():
+            try:
+                r = ghsync.push_state(self.app.db, message="overwrite from pc")
+                ok, msg = True, f"已覆盖云端（{r['sha']}）：{r['words']} 个词条"
+            except Exception as exc:  # noqa: BLE001
+                ok, msg = False, str(exc)
+
+            def done():
+                self.status.configure(text=msg, fg=theme.SUCCESS if ok else theme.ERROR)
+                self._busy(False)
             try:
                 self.after(0, done)
             except Exception:

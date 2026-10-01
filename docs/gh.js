@@ -46,6 +46,12 @@ export function saveLocalState(state) {
   localStorage.setItem(STATE_KEY, JSON.stringify(state));
 }
 
+/** 清空本机数据. 合并是求并集的, 不先清掉, 本机旧进度会在下次同步时流回云端. */
+export function clearLocal() {
+  localStorage.removeItem(STATE_KEY);
+  localStorage.removeItem(PENDING_KEY);
+}
+
 /** 有未推送的改动时置位, 界面上提示"待同步" */
 export const markPending = (on) => {
   if (on) localStorage.setItem(PENDING_KEY, '1');

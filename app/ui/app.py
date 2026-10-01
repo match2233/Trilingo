@@ -101,9 +101,19 @@ class TrilingoApp(tk.Tk):
 
         def worker():
             try:
-                r = ghsync.sync(self.db, device="pc")
-                log.info("自动同步完成: %s", r)
-                msg = f"同步完成 · 事件 {r['events']} · 错题 {r['mistakes']} · 打卡 {r['days']} 天"
+                # 标记了 force_push 时改为"以本机覆盖云端"。
+                # 重置进度后必须这样, 否则启动时的常规同步会把云端刚被清掉的
+                # 数据重新合并回来 —— 并集语义下, 本机删掉的东西删不掉。
+                if self.db.meta_get("force_push", "") == "1":
+                    r = ghsync.push_state(self.db, message="reset: overwrite remote")
+                    self.db.meta_set("force_push", "")
+                    log.info("已覆盖云端: %s", r)
+                    msg = f"已用本机数据覆盖云端（{r['sha']}）· 重置完成"
+                else:
+                    r = ghsync.sync(self.db, device="pc")
+                    log.info("自动同步完成: %s", r)
+                    msg = (f"同步完成 · 事件 {r['events']} · 错题 {r['mistakes']} "
+                           f"· 打卡 {r['days']} 天")
             except Exception as exc:  # noqa: BLE001
                 log.warning("自动同步失败: %s", exc)
                 msg = f"同步失败：{exc}"

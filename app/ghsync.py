@@ -233,6 +233,27 @@ def sync(db, device: str = "pc", message: str = "") -> dict:
     }
 
 
+def push_state(db, message: str = "") -> dict:
+    """用本机状态**覆盖**云端, 不做合并.
+
+    普通同步是求并集, 因此本机删掉的东西会被云端带回来。重置进度、或本机
+    才是权威时, 需要这个"以本机为准"的写入。
+    """
+    cfg = load_config()
+    if not is_configured():
+        raise SyncError("尚未配置同步（需要 GitHub token 与仓库名）")
+
+    state = state_from_db(db)
+    state["updated"] = _now()
+    try:
+        _, sha = fetch(cfg)
+    except SyncError:
+        sha = ""
+    new_sha = put(state, sha, cfg, message or "overwrite from pc")
+    return {"sha": (new_sha or "")[:8], "events": len(state["events"]),
+            "words": len(state["words"]["en"]) + len(state["words"]["jp"])}
+
+
 def der_count(state: dict) -> dict:
     return sc.derive(state)["mistakes"]
 

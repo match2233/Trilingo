@@ -500,6 +500,17 @@ function bind() {
   };
   $('syncBtn').onclick = () => doSync(true);
 
+  $('clearBtn').onclick = () => {
+    if (!confirm('将清空本机保存的学习数据，然后从云端重新拉取。\n\n'
+               + '本机上还没同步出去的答题记录会丢失。\n\n确定继续吗？')) return;
+    gh.clearLocal();
+    S.state = gh.loadLocalState();
+    refreshDerived();
+    renderAll();
+    toast('已清空，正在从云端重新拉取…');
+    doSync(true);
+  };
+
   // 回到前台且有待同步内容时自动推一次
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden && gh.hasPending()) syncQuiet();

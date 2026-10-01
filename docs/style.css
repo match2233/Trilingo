@@ -90,6 +90,10 @@ button.primary {
   box-shadow: 0 6px 18px -8px var(--primary);
 }
 button.ghost { background: transparent; border: none; color: var(--primary); padding: 6px 4px; font-size: 16px; }
+button.danger {
+  color: var(--error); border-color: var(--error);
+  background: var(--error-soft); font-weight: 600;
+}
 button:disabled { opacity: .4; }
 .btn-row { display: flex; gap: 10px; margin-top: 12px; }
 .btn-row button { flex: 1; }

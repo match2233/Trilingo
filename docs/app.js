@@ -90,6 +90,11 @@ function startQuiz(lang) {
   S.quiz = { lang, plan, idx: 0, answered, revealed: false, timer: null };
   // 跳到第一道还没答的
   while (S.quiz.idx < plan.length && answered.has(plan[S.quiz.idx].w)) S.quiz.idx++;
+
+  // 另一台设备已经把今天的任务做完了 -> 直接显示完成页, 不要让人重做一遍
+  const synced = ((S.der.done || {})[C.today()] || {})[lang] || 0;
+  if (plan.length > 0 && synced >= plan.length) S.quiz.idx = plan.length;
+
   showView('quiz');
   renderQuiz();   // 之前漏了这一步 —— 进入测验页永远是空白
 }
@@ -230,8 +235,13 @@ function renderHome() {
   let planDone = 0;
   for (const lang of ['en', 'jp']) {
     const plan = C.planFor(t, lang, words(lang), der);
-    const answered = new Set(todayEvents(lang).map((e) => e.w));
-    const done = plan.filter((p) => answered.has(p.w)).length;
+    // 今天做了什么, 由两部分构成: 本机答的 + 另一台设备同步过来的计数。
+    // 电脑端的作答折叠进了 base, 具体是哪些词已经无从得知, 但答了多少是知道的。
+    const local = new Set(todayEvents(lang).map((e) => e.w));
+    const localDone = plan.filter((p) => local.has(p.w)).length;
+    const synced = ((der.done || {})[t] || {})[lang] || 0;
+    const done = Math.min(plan.length, Math.max(localDone, synced));
+
     planTotal += plan.length;
     planDone += done;
 

@@ -24,7 +24,8 @@
   "base": {
     "stats":    {"en:shrug": "2026-09-10"},          # 最后学习日
     "mistakes": {"jp:学生": {"a":"2026-09-14","s":1,"e":2,"g":0,"t":1758}},
-    "days":     ["2026-09-14", "2026-09-15"]         # 已完成(打卡)的日期
+    "days":     ["2026-09-14", "2026-09-15"],        # 已完成(打卡)的日期
+    "done":     {"2026-09-14": {"en": 7, "jp": 15}}  # 当天各语言已答题数
   },
   "events": [{"i":"...","t":1758...,"d":"pc","l":"en","w":"shrug","o":1,"day":"2026-09-18"}]
 }
@@ -97,6 +98,12 @@ def derive(state: dict) -> dict:
     mistakes = {k: dict(v) for k, v in (base.get("mistakes") or {}).items()}
     days = set(base.get("days") or [])
     daily: dict[str, dict[str, dict]] = {}
+    # 每天每门语言答了多少题。事件被折叠进 base 后, 这些计数是另一台设备
+    # 唯一能知道"今天做了多少"的依据 —— 光有 days 只能判断打卡, 判断不了进度。
+    done: dict[str, dict[str, int]] = {
+        d: {k: int(v) for k, v in (langs or {}).items()}
+        for d, langs in (base.get("done") or {}).items()
+    }
 
     events = sorted(
         state.get("events") or [],
@@ -135,11 +142,14 @@ def derive(state: dict) -> dict:
 
     # 打卡: 当天任一门语言答满该语言的目标题数
     for day, langs in daily.items():
+        slot = done.setdefault(day, {})
         for lang, d in langs.items():
-            if len(d["answered"]) >= daily_target(lang):
+            n = len(d["answered"])
+            slot[lang] = max(slot.get(lang, 0), n)
+            if n >= daily_target(lang):
                 days.add(day)
 
-    return {"stats": stats, "mistakes": mistakes, "days": days, "daily": daily}
+    return {"stats": stats, "mistakes": mistakes, "days": days, "daily": daily, "done": done}
 
 
 def next_due(m: dict) -> str | None:
@@ -214,6 +224,7 @@ def merge(local: dict, remote: dict) -> dict:
         "stats": _merge_stats(lb.get("stats") or {}, rb.get("stats") or {}),
         "mistakes": _merge_mistakes(lb.get("mistakes") or {}, rb.get("mistakes") or {}),
         "days": sorted(set(lb.get("days") or []) | set(rb.get("days") or [])),
+        "done": _merge_done(lb.get("done") or {}, rb.get("done") or {}),
     }
 
     # 事件按 id 去重后取并集
@@ -267,6 +278,18 @@ def _merge_stats(a: dict, b: dict) -> dict:
     return {k: max(a.get(k, ""), b.get(k, "")) for k in set(a) | set(b)}
 
 
+def _merge_done(a: dict, b: dict) -> dict:
+    """每天每语言取较大的已答数 —— 两端都答过时以多的为准, 不会互相抵消."""
+    out: dict[str, dict[str, int]] = {}
+    for day in set(a) | set(b):
+        la, lb = a.get(day) or {}, b.get(day) or {}
+        out[day] = {
+            k: max(int(la.get(k) or 0), int(lb.get(k) or 0))
+            for k in set(la) | set(lb)
+        }
+    return out
+
+
 def _merge_mistakes(a: dict, b: dict) -> dict:
     out: dict[str, dict] = {}
     for key in set(a) | set(b):
@@ -291,6 +314,7 @@ def _normalize(state: dict) -> dict:
         "stats": base.get("stats") or {},
         "mistakes": base.get("mistakes") or {},
         "days": sorted(set(base.get("days") or [])),
+        "done": base.get("done") or {},
     }
     for lang in ("en", "jp"):
         out["words"].setdefault(lang, [])
@@ -317,6 +341,7 @@ def _compact(state: dict, today: str | None = None) -> dict:
         "stats": der["stats"],
         "mistakes": der["mistakes"],
         "days": sorted(der["days"]),
+        "done": der["done"],       # 折叠后仍要保留"每天做了多少"
     }
     state["events"] = keep
     return state
@@ -380,7 +405,17 @@ def build_base_from_db(db, today: str | None = None) -> dict:
             "SELECT DISTINCT day FROM daily_log WHERE completed=1"
         )
     ]
-    return {"stats": stats, "mistakes": mistakes, "days": sorted(set(days))}
+
+    # 每天每语言已答多少 —— 供另一台设备显示进度
+    done: dict[str, dict[str, int]] = {}
+    for r in db.conn.execute(
+        "SELECT day, lang, SUM(answered) a FROM daily_plan GROUP BY day, lang"
+    ):
+        if r["a"]:
+            done.setdefault(r["day"], {})[r["lang"]] = int(r["a"])
+
+    return {"stats": stats, "mistakes": mistakes,
+            "days": sorted(set(days)), "done": done}
 
 
 def streak(days: set[str], today: str | None = None) -> int:

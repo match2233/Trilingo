@@ -50,7 +50,7 @@ export function emptyState() {
     updated: '',
     words: { en: [], jp: [] },
     edits: {},
-    base: { stats: {}, mistakes: {}, days: [] },
+    base: { stats: {}, mistakes: {}, days: [], done: {} },
     events: [],
   };
 }
@@ -65,6 +65,10 @@ export function derive(state) {
   for (const [k, v] of Object.entries(base.mistakes || {})) mistakes[k] = { ...v };
   const days = new Set(base.days || []);
   const daily = {};
+  // 每天每门语言答了多少题。事件折叠进 base 后, 这是另一台设备唯一能知道
+  // "今天做了多少"的依据 —— 光有 days 只能判断打卡, 判断不了进度。
+  const done = {};
+  for (const [d, langs] of Object.entries(base.done || {})) done[d] = { ...langs };
 
   const events = [...(state.events || [])].sort(
     (a, b) => (a.t || 0) - (b.t || 0) || (a.i < b.i ? -1 : a.i > b.i ? 1 : 0)
@@ -101,12 +105,15 @@ export function derive(state) {
 
   // 打卡：当天任一门语言答满该语言的目标题数
   for (const [day, langs] of Object.entries(daily)) {
+    if (!done[day]) done[day] = {};
     for (const [lang, d] of Object.entries(langs)) {
-      if (d.answered.length >= dailyTarget(lang)) days.add(day);
+      const n = d.answered.length;
+      done[day][lang] = Math.max(done[day][lang] || 0, n);
+      if (n >= dailyTarget(lang)) days.add(day);
     }
   }
 
-  return { stats, mistakes, days, daily };
+  return { stats, mistakes, days, daily, done };
 }
 
 export function nextDue(m) {
@@ -177,6 +184,7 @@ export function merge(local, remote) {
     stats: mergeStats(lb.stats || {}, rb.stats || {}),
     mistakes: mergeMistakes(lb.mistakes || {}, rb.mistakes || {}),
     days: [...new Set([...(lb.days || []), ...(rb.days || [])])].sort(),
+    done: mergeDone(lb.done || {}, rb.done || {}),
   };
 
   const seen = {};
@@ -229,6 +237,20 @@ function mergeStats(a, b) {
   return out;
 }
 
+/** 每天每语言取较大的已答数 —— 两端都答过时以多的为准，不会互相抵消 */
+function mergeDone(a, b) {
+  const out = {};
+  for (const day of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    const la = a[day] || {}, lb = b[day] || {};
+    const slot = {};
+    for (const k of new Set([...Object.keys(la), ...Object.keys(lb)])) {
+      slot[k] = Math.max(Number(la[k]) || 0, Number(lb[k]) || 0);
+    }
+    out[day] = slot;
+  }
+  return out;
+}
+
 function mergeMistakes(a, b) {
   const out = {};
   for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
@@ -252,6 +274,7 @@ function normalize(state) {
     stats: base.stats || {},
     mistakes: base.mistakes || {},
     days: [...new Set(base.days || [])].sort(),
+    done: base.done || {},
   };
   out.words = out.words || { en: [], jp: [] };
   out.words.en = out.words.en || [];
@@ -273,6 +296,7 @@ function compact(state, todayStr) {
     stats: der.stats,
     mistakes: der.mistakes,
     days: [...der.days].sort(),
+    done: der.done,       // 折叠后仍要保留"每天做了多少"
   };
   state.events = keep;
   return state;

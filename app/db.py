@@ -533,7 +533,13 @@ class Database:
         raw = self.meta_get("sync_base", "")
         if raw:
             try:
-                return json.loads(raw)
+                base = json.loads(raw)
+                if "done" not in base:
+                    # 早期版本的快照没有 done 字段, 从当天计划补出来,
+                    # 否则另一台设备看不到本机的完成进度
+                    base["done"] = self._done_from_plan()
+                    self.meta_set("sync_base", json.dumps(base, ensure_ascii=False))
+                return base
             except Exception:
                 pass
 
@@ -543,6 +549,16 @@ class Database:
         self.conn.execute("DELETE FROM events")
         self.conn.commit()
         return base
+
+    def _done_from_plan(self) -> dict:
+        """每天每门语言已答多少题 —— 从当日计划统计."""
+        out: dict[str, dict[str, int]] = {}
+        for r in self.conn.execute(
+            "SELECT day, lang, SUM(answered) a FROM daily_plan GROUP BY day, lang"
+        ):
+            if r["a"]:
+                out.setdefault(r["day"], {})[r["lang"]] = int(r["a"])
+        return out
 
     def set_base(self, base: dict) -> None:
         self.meta_set("sync_base", json.dumps(base, ensure_ascii=False))

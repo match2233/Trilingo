@@ -11,8 +11,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Trilingo">
-<meta name="theme-color" content="#e8622c" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#14161c" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f7f8fc" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#12141a" media="(prefers-color-scheme: dark)">
 
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon-192.png">
@@ -25,53 +25,94 @@
 
   <!-- ============================== 首页 ============================== -->
   <section id="home" class="view active">
-    <div class="streak card">
-      <div>
-        <div class="lbl">已连续打卡</div>
-        <div class="num" id="streakNum">0 天</div>
-      </div>
-    </div>
-    <p class="sub" id="syncNote" style="margin:-8px 0 12px 2px"></p>
 
-    <div class="grid2">
-      <div class="tile en card" id="tileEn">
-        <div class="t">英语词汇</div><div class="d"></div>
+    <header class="brand">
+      <img src="icons/icon-192.png" class="logo" alt="">
+      <div class="brand-text">
+        <div class="brand-name">Trilingo</div>
+        <div class="brand-sub">英语 · 日语 背单词</div>
       </div>
-      <div class="tile err card" id="tileErrEn">
-        <div class="t">错题本</div><div class="d"></div>
+    </header>
+
+    <!-- 打卡 + 今日总进度 -->
+    <div class="hero">
+      <div class="hero-top">
+        <div class="hero-fire">🔥</div>
+        <div class="hero-num"><span id="streakNum">0</span><em>天</em></div>
+        <div class="hero-lbl">已连续打卡</div>
       </div>
-      <div class="tile en card" id="tileJp">
-        <div class="t">日语词汇</div><div class="d"></div>
-      </div>
-      <div class="tile err card" id="tileErrJp">
-        <div class="t">错题本</div><div class="d"></div>
+      <div class="hero-bar-wrap">
+        <div class="hero-bar-row"><span>今日进度</span><span id="todayPct">0%</span></div>
+        <div class="progress"><i id="todayBar"></i></div>
+        <div class="hero-hint" id="todayHint">还没有开始</div>
       </div>
     </div>
+
+    <!-- 四个入口 -->
+    <div class="grid2">
+      <button class="tile" id="tileEn">
+        <span class="tile-tag">英语</span>
+        <span class="tile-main">词汇</span>
+        <span class="tile-foot" data-foot></span>
+      </button>
+      <button class="tile" id="tileErrEn">
+        <span class="tile-tag blue">英语</span>
+        <span class="tile-main">错题本</span>
+        <span class="tile-foot" data-foot></span>
+      </button>
+      <button class="tile" id="tileJp">
+        <span class="tile-tag">日语</span>
+        <span class="tile-main">词汇</span>
+        <span class="tile-foot" data-foot></span>
+      </button>
+      <button class="tile" id="tileErrJp">
+        <span class="tile-tag blue">日语</span>
+        <span class="tile-main">错题本</span>
+        <span class="tile-foot" data-foot></span>
+      </button>
+    </div>
+
+    <!-- 累计数据 -->
+    <div class="stat-row">
+      <div class="stat"><b id="statWords">0</b><span>词条</span></div>
+      <div class="stat"><b id="statStudied">0</b><span>已学</span></div>
+      <div class="stat"><b id="statMistakes">0</b><span>错题</span></div>
+    </div>
+
+    <div class="sync-pill" id="syncPill"></div>
   </section>
 
   <!-- ============================== 测验 ============================== -->
   <section id="quiz" class="view">
     <div class="quiz-head">
-      <button class="back" id="backBtn">← 返回</button>
+      <button class="ghost" id="backBtn">‹ 返回</button>
       <span class="title" id="quizTitle"></span>
     </div>
     <div class="bar"><i id="bar"></i></div>
 
-    <div class="quiz-body">
+    <div id="quizBody" class="quiz-body">
       <div class="badge" id="badge"></div>
       <div class="meaning" id="meaning"></div>
 
-      <div>
+      <div class="answer-wrap">
         <input type="text" id="answer" enterkeyhint="done" autocomplete="off"
                autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="输入后按回车">
-        <button class="primary" id="submitBtn" style="width:100%;margin-top:10px">提交</button>
+        <button class="primary" id="submitBtn">提交</button>
       </div>
 
       <div class="result" id="result"></div>
 
-      <div style="display:flex;justify-content:flex-end">
+      <div class="next-wrap">
         <button class="primary" id="nextBtn" style="display:none">下一个 ›</button>
       </div>
+    </div>
+
+    <!-- 背完之后显示这个, 而不是留一个空白页 -->
+    <div id="quizDone" class="quiz-done">
+      <div class="done-icon">🎉</div>
+      <div class="done-title">今日任务已完成</div>
+      <div class="done-stats" id="doneStats"></div>
+      <button class="primary" id="doneBack">返回首页</button>
     </div>
   </section>
 
@@ -93,14 +134,14 @@
       <button data-lang="en" class="on">英语</button>
       <button data-lang="jp">日语</button>
     </div>
-    <input type="search" id="search" placeholder="搜索单词或释义" style="font-size:16px;text-align:left;margin-bottom:6px">
+    <input type="search" id="search" placeholder="搜索单词或释义" class="search">
     <p class="sub" id="dbCount"></p>
     <div class="list" id="dbList"></div>
   </section>
 
   <!-- ============================== 设置 ============================== -->
   <section id="settings" class="view">
-    <h1>同步设置</h1>
+    <h1>同步</h1>
     <p class="sub">学习数据存放在一个 GitHub 私有仓库里，两台设备各自拉取、合并、回传。</p>
 
     <h2>访问令牌</h2>
@@ -117,14 +158,10 @@
     <div class="btn-row">
       <button class="primary" id="syncBtn">立即同步</button>
     </div>
-    <p class="sub" id="syncMsg" style="margin-top:10px"></p>
+    <p class="sub" id="syncMsg"></p>
 
     <h2>当前数据</h2>
     <p class="sub" id="stats"></p>
-
-    <h2>安装到主屏幕</h2>
-    <p class="sub">在 Safari 中打开本页 → 点底部分享按钮 → 选择「添加到主屏幕」。
-      之后从主屏幕启动就会像原生应用一样全屏运行，断网也能背单词。</p>
   </section>
 
 </div>

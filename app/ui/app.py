@@ -207,11 +207,12 @@ class MenuFrame(tk.Frame):
 
         row = tk.Frame(bottom, bg=theme.BG)
         row.pack(fill="x")
-        FlatButton(row, "数据库", lambda: self.app.show("database"),
-                   bg=theme.CARD, fg=theme.TEXT, font=theme.f(12), pady=12).pack(
-            side="left", fill="x", expand=True)
+        # 两个按钮都带副标题, 高度才会一致 (副标题是包在按钮内部的独立 Label)
+        self.db_btn = FlatButton(row, "数据库", lambda: self.app.show("database"),
+                                 bg=theme.CARD, fg=theme.TEXT, font=theme.f(12), pady=10)
+        self.db_btn.pack(side="left", fill="x", expand=True)
         self.sync_btn = FlatButton(row, "同步", self._open_sync, bg=theme.CARD,
-                                   fg=theme.TEXT, font=theme.f(12), pady=12, padx=26)
+                                   fg=theme.TEXT, font=theme.f(12), pady=10, padx=26)
         self.sync_btn.pack(side="left", padx=(10, 0))
 
     def _open_sync(self) -> None:
@@ -263,9 +264,14 @@ class MenuFrame(tk.Frame):
         # 同步状态优先显示, 方便一眼看出手机端的数据有没有拉过来
         parts = [t for t in (self.app._sync_notice, self.app._enrich_notice) if t]
         self.notice.configure(text="　·　".join(parts))
+
+        from .. import ghsync
+
         if self.app._sync_notice.startswith("同步失败"):
             self.sync_btn.set_subtitle("点击查看")
         else:
-            from .. import ghsync
-
             self.sync_btn.set_subtitle("已开启" if ghsync.is_configured() else "未设置")
+
+        db = self.app.db
+        total = len(db.en_words()) + len(db.jp_words())
+        self.db_btn.set_subtitle(f"{total} 个词条")

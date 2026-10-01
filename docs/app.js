@@ -91,6 +91,7 @@ function startQuiz(lang) {
   // 跳到第一道还没答的
   while (S.quiz.idx < plan.length && answered.has(plan[S.quiz.idx].w)) S.quiz.idx++;
   showView('quiz');
+  renderQuiz();   // 之前漏了这一步 —— 进入测验页永远是空白
 }
 
 function renderQuiz() {
@@ -100,20 +101,25 @@ function renderQuiz() {
   const done = q.answered.size;
 
   $('bar').style.width = total ? `${Math.min(100, (done / total) * 100)}%` : '0%';
-  $('quizTitle').textContent =
-    `${q.lang === 'en' ? '英语' : '日语'} · ${Math.min(q.idx + 1, total)}/${total}`;
 
-  if (q.idx >= total) {
-    $('meaning').textContent = '🎉 今日完成';
-    $('meaning').className = 'meaning ok-text';
-    $('badge').textContent = '';
-    $('answer').value = '';
-    $('answer').disabled = true;
-    $('answer').className = '';
-    setResult([], '');
-    $('nextBtn').style.display = 'none';
+  // 今天已经背完: 显示完成页, 而不是留一个空白的答题界面
+  const finished = q.idx >= total;
+  $('quizBody').style.display = finished ? 'none' : 'flex';
+  $('quizDone').classList.toggle('show', finished);
+
+  if (finished) {
+    const label = q.lang === 'en' ? '英语' : '日语';
+    const evs = todayEvents(q.lang);
+    const ok = evs.filter((e) => e.o).length;
+    const pct = evs.length ? Math.round((ok / evs.length) * 100) : 0;
+    $('quizTitle').textContent = `${label} · 已完成`;
+    $('doneStats').innerHTML =
+      `今日 ${total} 个词已全部过完<br>答对 ${ok} 个　正确率 ${pct}%` +
+      (q.answered.size < total ? '<br><span style="color:var(--faint)">（含此前已完成的）</span>' : '');
     return;
   }
+  $('quizTitle').textContent =
+    `${q.lang === 'en' ? '英语' : '日语'} · ${q.idx + 1}/${total}`;
 
   const item = q.plan[q.idx];
   const rec = wordRec(q.lang, item.w);
@@ -216,21 +222,35 @@ function exitQuiz() {
 function renderHome() {
   const t = C.today();
   const der = S.der;
-  const st = C.streak(der.days);
-  $('streakNum').textContent = `${st} 天`;
 
+  $('streakNum').textContent = C.streak(der.days);
+
+  // 四个入口, 顺带累计今日总进度
+  let planTotal = 0;
+  let planDone = 0;
   for (const lang of ['en', 'jp']) {
     const plan = C.planFor(t, lang, words(lang), der);
     const answered = new Set(todayEvents(lang).map((e) => e.w));
     const done = plan.filter((p) => answered.has(p.w)).length;
+    planTotal += plan.length;
+    planDone += done;
+
     const el = $(lang === 'en' ? 'tileEn' : 'tileJp');
     const complete = plan.length > 0 && done >= plan.length;
     el.classList.toggle('done', complete);
-    el.querySelector('.d').textContent = complete
+    el.querySelector('[data-foot]').textContent = complete
       ? '今日已完成 ✓'
       : (done ? `${done} / ${plan.length}` : `共 ${plan.length} 个`);
   }
 
+  const pct = planTotal ? Math.round((planDone / planTotal) * 100) : 0;
+  $('todayPct').textContent = `${pct}%`;
+  $('todayBar').style.width = `${pct}%`;
+  $('todayHint').textContent = planTotal === 0
+    ? '词表里还没有内容'
+    : (planDone >= planTotal ? '今天的任务已全部完成 🎉' : `还剩 ${planTotal - planDone} 个词`);
+
+  // 错题本入口
   for (const lang of ['en', 'jp']) {
     const open = Object.entries(der.mistakes)
       .filter(([k, m]) => k.startsWith(lang + ':') && !m.g);
@@ -239,17 +259,24 @@ function renderHome() {
       return d && d <= t;
     }).length;
     const el = $(lang === 'en' ? 'tileErrEn' : 'tileErrJp');
-    el.querySelector('.d').textContent = open.length
-      ? (due ? `${open.length} 个 · 待复习 ${due}` : `${open.length} 个错词`)
+    el.querySelector('[data-foot]').textContent = open.length
+      ? (due ? `${open.length} 个 · 今日待复习 ${due}` : `${open.length} 个待复习`)
       : '暂无错词';
   }
 
-  const pend = gh.hasPending();
+  // 累计数据
+  $('statWords').textContent = words('en').length + words('jp').length;
+  $('statStudied').textContent = Object.keys(der.stats).length;
+  $('statMistakes').textContent = Object.values(der.mistakes).filter((m) => !m.g).length;
+
+  // 同步状态
   const cfgOk = gh.isConfigured();
-  $('syncNote').textContent = !cfgOk
-    ? '未开启同步'
-    : (pend ? '有改动待同步' : '已同步');
-  $('syncNote').className = 'sub' + (pend ? ' pending' : '');
+  const pend = gh.hasPending();
+  const pill = $('syncPill');
+  pill.textContent = !cfgOk
+    ? '未开启同步 · 在「同步」页配置'
+    : (pend ? '有改动待同步 · 回到首页会自动推送' : '数据已同步');
+  pill.className = 'sync-pill' + (pend ? ' pending' : '');
 }
 
 /* ------------------------------------------------------------------ 错题本 */
@@ -425,6 +452,7 @@ function bind() {
   });
 
   $('backBtn').onclick = exitQuiz;
+  $('doneBack').onclick = exitQuiz;
   $('answer').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); submitAnswer(); }
   });

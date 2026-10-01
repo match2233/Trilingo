@@ -4,7 +4,8 @@
  * GitHub API 一律走网络、不缓存，避免读到过期的学习数据。
  */
 
-const CACHE = 'trilingo-v1';
+// 改动 docs/ 下的任何文件后, 把版本号加一, 否则手机会一直用缓存里的旧版本
+const CACHE = 'trilingo-v2';
 
 const SHELL = [
   './',

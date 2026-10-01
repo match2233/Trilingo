@@ -46,12 +46,6 @@ export function saveLocalState(state) {
   localStorage.setItem(STATE_KEY, JSON.stringify(state));
 }
 
-/** 清空本机数据. 合并是求并集的, 不先清掉, 本机旧进度会在下次同步时流回云端. */
-export function clearLocal() {
-  localStorage.removeItem(STATE_KEY);
-  localStorage.removeItem(PENDING_KEY);
-}
-
 /** 有未推送的改动时置位, 界面上提示"待同步" */
 export const markPending = (on) => {
   if (on) localStorage.setItem(PENDING_KEY, '1');
@@ -136,7 +130,9 @@ export async function syncNow() {
   const local = loadLocalState();
 
   const { state: remote, sha } = await pull(cfg);
-  let merged = merge(local, remote);
+  // 冲突时以远端(电脑端)为准: 错题本、打卡、进度这些派生状态由电脑端说了算。
+  // 本机的答题事件仍会并入, 所以手机上做的题不会丢。
+  let merged = merge(local, remote, 'remote');
   merged.updated = new Date().toISOString().slice(0, 19);
 
   const changed = JSON.stringify({ ...local, updated: '' }) !== JSON.stringify({ ...merged, updated: '' });
@@ -149,7 +145,7 @@ export async function syncNow() {
       if (e.status !== 409) throw e;
       // 期间被另一端改过: 重拉、重合并、再提交一次
       const again = await pull(cfg);
-      merged = merge(merged, again.state);
+      merged = merge(merged, again.state, 'remote');
       newSha = await push(merged, again.sha, cfg, 'sync from iphone (retry)');
     }
   }
@@ -170,7 +166,7 @@ export async function pullOnly() {
   const cfg = loadConfig();
   const local = loadLocalState();
   const { state: remote } = await pull(cfg);
-  const merged = merge(local, remote);
+  const merged = merge(local, remote, 'remote');
   saveLocalState(merged);
   return merged;
 }

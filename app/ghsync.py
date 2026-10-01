@@ -201,7 +201,9 @@ def sync(db, device: str = "pc", message: str = "") -> dict:
 
     local = state_from_db(db)
     remote, sha = fetch(cfg)
-    merged = sc.merge(local, remote)
+    # 电脑端是权威: 派生状态(错题本、打卡、进度)冲突时以本机为准。
+    # 答题事件仍然求并集, 所以手机做过的题不会被丢掉。
+    merged = sc.merge(local, remote, prefer="local")
     merged["updated"] = _now()
 
     # 合并没有变化就不必写回, 省一次提交
@@ -216,7 +218,7 @@ def sync(db, device: str = "pc", message: str = "") -> dict:
                 raise
             # 期间被另一端改过: 重拉、重合并、再试一次
             remote2, sha2 = fetch(cfg)
-            merged = sc.merge(merged, remote2)
+            merged = sc.merge(merged, remote2, prefer="local")
             merged["updated"] = _now()
             new_sha = put(merged, sha2, cfg, message or f"sync from {device} (retry)")
 

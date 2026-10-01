@@ -208,23 +208,33 @@ def plan_for(day: str, lang: str, words: list[dict], der: dict) -> list[dict]:
 
 
 # ------------------------------------------------------------------ 合并
-def merge(local: dict, remote: dict) -> dict:
-    """合并两份状态. 交换律与结合律都成立, 两端各自合一次结果相同."""
+def merge(local: dict, remote: dict, prefer: str | None = None) -> dict:
+    """合并两份状态.
+
+    prefer=None     对等合并: 逐字段取较新或求并集
+    prefer="local"  冲突时以本端为准    —— 电脑端同步时用
+    prefer="remote" 冲突时以远端为准    —— 手机端同步时用
+
+    **事件始终求并集, 不受 prefer 影响**: 答题记录是唯一不可再生的东西,
+    丢一条就是真丢了。受 prefer 影响的只是 base 里的派生状态(错题本、打卡、
+    学习统计、每日进度)以及词表和人工编辑 —— 这些要么可重算, 要么以电脑端
+    为准才不会互相打架。
+    """
     if not remote:
         return _normalize(local)
     if not local:
         return _normalize(remote)
 
     out = empty_state()
-    out["words"] = _merge_words(local.get("words") or {}, remote.get("words") or {})
-    out["edits"] = _merge_edits(local.get("edits") or {}, remote.get("edits") or {})
+    out["words"] = _merge_words(local.get("words") or {}, remote.get("words") or {}, prefer)
+    out["edits"] = _merge_edits(local.get("edits") or {}, remote.get("edits") or {}, prefer)
 
     lb, rb = local.get("base") or {}, remote.get("base") or {}
     out["base"] = {
-        "stats": _merge_stats(lb.get("stats") or {}, rb.get("stats") or {}),
-        "mistakes": _merge_mistakes(lb.get("mistakes") or {}, rb.get("mistakes") or {}),
-        "days": sorted(set(lb.get("days") or []) | set(rb.get("days") or [])),
-        "done": _merge_done(lb.get("done") or {}, rb.get("done") or {}),
+        "stats": _merge_stats(lb.get("stats") or {}, rb.get("stats") or {}, prefer),
+        "mistakes": _merge_mistakes(lb.get("mistakes") or {}, rb.get("mistakes") or {}, prefer),
+        "days": _merge_days(lb.get("days") or [], rb.get("days") or [], prefer),
+        "done": _merge_done(lb.get("done") or {}, rb.get("done") or {}, prefer),
     }
 
     # 事件按 id 去重后取并集
@@ -238,12 +248,19 @@ def merge(local: dict, remote: dict) -> dict:
     return _compact(_normalize(out))
 
 
-def _merge_words(a: dict, b: dict) -> dict:
+def _sides(a, b, prefer):
+    """按 prefer 返回 (优先方, 另一方)."""
+    return (a, b) if prefer == "local" else (b, a)
+
+
+def _merge_words(a: dict, b: dict, prefer: str | None = None) -> dict:
     """词表按 (语言, 单词) 取并集; 重复时保留 updated 较新的那份."""
     out = {"en": [], "jp": []}
+    first, second = _sides(a, b, prefer) if prefer else (a, b)
     for lang in ("en", "jp"):
         by_word: dict[str, dict] = {}
-        for rec in list(a.get(lang) or []) + list(b.get(lang) or []):
+        # 优先方放在后面, 时间戳相同时它会胜出
+        for rec in list(second.get(lang) or []) + list(first.get(lang) or []):
             w = rec.get("w")
             if not w:
                 continue
@@ -254,7 +271,7 @@ def _merge_words(a: dict, b: dict) -> dict:
     return out
 
 
-def _merge_edits(a: dict, b: dict) -> dict:
+def _merge_edits(a: dict, b: dict, prefer: str | None = None) -> dict:
     out: dict[str, dict] = {}
     for key in set(a) | set(b):
         ra, rb = a.get(key) or {}, b.get(key) or {}
@@ -262,35 +279,61 @@ def _merge_edits(a: dict, b: dict) -> dict:
             out[key] = ra; continue
         if not ra:
             out[key] = rb; continue
-        # 逐字段按时间戳取胜, 而不是整条覆盖
-        merged = dict(ra)
-        for f, v in rb.items():
-            if f == "t":
-                continue
-            if v != ra.get(f) and rb.get("t", 0) >= ra.get("t", 0):
-                merged[f] = v
+        if prefer:
+            first, second = _sides(ra, rb, prefer)
+            merged = dict(second)
+            merged.update(first)         # 优先方逐字段覆盖
+        else:
+            # 逐字段按时间戳取胜, 而不是整条覆盖
+            merged = dict(ra)
+            for f, v in rb.items():
+                if f == "t":
+                    continue
+                if v != ra.get(f) and rb.get("t", 0) >= ra.get("t", 0):
+                    merged[f] = v
         merged["t"] = max(ra.get("t", 0), rb.get("t", 0))
         out[key] = merged
     return out
 
 
-def _merge_stats(a: dict, b: dict) -> dict:
+def _merge_stats(a: dict, b: dict, prefer: str | None = None) -> dict:
+    if prefer:
+        first, second = _sides(a, b, prefer)
+        out = dict(second)
+        out.update(first)                # 优先方说了算, 包括"把日期改早"
+        return out
     return {k: max(a.get(k, ""), b.get(k, "")) for k in set(a) | set(b)}
 
 
-def _merge_done(a: dict, b: dict) -> dict:
-    """每天每语言取较大的已答数 —— 两端都答过时以多的为准, 不会互相抵消."""
+def _merge_days(a: list, b: list, prefer: str | None = None) -> list:
+    """打卡日期. 指定 prefer 时以该端为准 (整份替换, 而不是求并集) ——
+    否则一端删掉的打卡记录会被另一端带回来."""
+    if prefer == "local":
+        return sorted(set(a)) if a else sorted(set(b))
+    if prefer == "remote":
+        return sorted(set(b)) if b else sorted(set(a))
+    return sorted(set(a) | set(b))
+
+
+def _merge_done(a: dict, b: dict, prefer: str | None = None) -> dict:
+    """每天每语言答了多少题."""
     out: dict[str, dict[str, int]] = {}
     for day in set(a) | set(b):
         la, lb = a.get(day) or {}, b.get(day) or {}
-        out[day] = {
-            k: max(int(la.get(k) or 0), int(lb.get(k) or 0))
-            for k in set(la) | set(lb)
-        }
+        if prefer:
+            first, second = _sides(la, lb, prefer)
+            slot = {k: int(second[k] or 0) for k in second}
+            slot.update({k: int(v or 0) for k, v in first.items()})
+            out[day] = slot
+        else:
+            out[day] = {
+                k: max(int(la.get(k) or 0), int(lb.get(k) or 0))
+                for k in set(la) | set(lb)
+            }
     return out
 
 
-def _merge_mistakes(a: dict, b: dict) -> dict:
+def _merge_mistakes(a: dict, b: dict, prefer: str | None = None) -> dict:
     out: dict[str, dict] = {}
     for key in set(a) | set(b):
         ra, rb = a.get(key), b.get(key)
@@ -298,6 +341,8 @@ def _merge_mistakes(a: dict, b: dict) -> dict:
             out[key] = rb
         elif rb is None:
             out[key] = ra
+        elif prefer:
+            out[key] = ra if prefer == "local" else rb
         else:
             out[key] = rb if rb.get("t", 0) >= ra.get("t", 0) else ra
     return out

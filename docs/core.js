@@ -170,21 +170,31 @@ export function planFor(day, lang, words, der) {
 
 /* ------------------------------------------------------------------ 合并 */
 
-export function merge(local, remote) {
+/** 合并两份状态.
+ *
+ * prefer = null      对等合并：逐字段取较新或求并集
+ * prefer = 'local'   冲突时以本端为准   —— 电脑端用
+ * prefer = 'remote'  冲突时以远端为准   —— 手机端用
+ *
+ * 事件始终求并集，不受 prefer 影响：答题记录是唯一不可再生的东西。
+ * 受 prefer 影响的只是 base 里的派生状态（错题本、打卡、学习统计、每日进度），
+ * 这些要么可重算，要么以电脑端为准才不会互相打架。
+ */
+export function merge(local, remote, prefer = null) {
   if (!remote || !Object.keys(remote).length) return normalize(local);
   if (!local || !Object.keys(local).length) return normalize(remote);
 
   const out = emptyState();
-  out.words = mergeWords(local.words || {}, remote.words || {});
-  out.edits = mergeEdits(local.edits || {}, remote.edits || {});
+  out.words = mergeWords(local.words || {}, remote.words || {}, prefer);
+  out.edits = mergeEdits(local.edits || {}, remote.edits || {}, prefer);
 
   const lb = local.base || {};
   const rb = remote.base || {};
   out.base = {
-    stats: mergeStats(lb.stats || {}, rb.stats || {}),
-    mistakes: mergeMistakes(lb.mistakes || {}, rb.mistakes || {}),
-    days: [...new Set([...(lb.days || []), ...(rb.days || [])])].sort(),
-    done: mergeDone(lb.done || {}, rb.done || {}),
+    stats: mergeStats(lb.stats || {}, rb.stats || {}, prefer),
+    mistakes: mergeMistakes(lb.mistakes || {}, rb.mistakes || {}, prefer),
+    days: mergeDays(lb.days || [], rb.days || [], prefer),
+    done: mergeDone(lb.done || {}, rb.done || {}, prefer),
   };
 
   const seen = {};
@@ -198,11 +208,16 @@ export function merge(local, remote) {
   return compact(normalize(out));
 }
 
-function mergeWords(a, b) {
+/** 按 prefer 返回 [优先方, 另一方] */
+const sides = (a, b, prefer) => (prefer === 'local' ? [a, b] : [b, a]);
+
+function mergeWords(a, b, prefer) {
   const out = { en: [], jp: [] };
+  const [first, second] = prefer ? sides(a, b, prefer) : [a, b];
   for (const lang of ['en', 'jp']) {
     const by = {};
-    for (const rec of [...(a[lang] || []), ...(b[lang] || [])]) {
+    // 优先方放在后面，时间戳相同时它会胜出
+    for (const rec of [...(second[lang] || []), ...(first[lang] || [])]) {
       if (!rec || !rec.w) continue;
       const old = by[rec.w];
       if (!old || (rec.u || 0) >= (old.u || 0)) by[rec.w] = rec;
@@ -212,16 +227,22 @@ function mergeWords(a, b) {
   return out;
 }
 
-function mergeEdits(a, b) {
+function mergeEdits(a, b, prefer) {
   const out = {};
   for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
     const ra = a[key], rb = b[key];
     if (!rb) { out[key] = ra; continue; }
     if (!ra) { out[key] = rb; continue; }
-    const merged = { ...ra };
-    for (const [f, v] of Object.entries(rb)) {
-      if (f === 't') continue;
-      if (v !== ra[f] && (rb.t || 0) >= (ra.t || 0)) merged[f] = v;
+    let merged;
+    if (prefer) {
+      const [first, second] = sides(ra, rb, prefer);
+      merged = { ...second, ...first };     // 优先方逐字段覆盖
+    } else {
+      merged = { ...ra };
+      for (const [f, v] of Object.entries(rb)) {
+        if (f === 't') continue;
+        if (v !== ra[f] && (rb.t || 0) >= (ra.t || 0)) merged[f] = v;
+      }
     }
     merged.t = Math.max(ra.t || 0, rb.t || 0);
     out[key] = merged;
@@ -229,7 +250,11 @@ function mergeEdits(a, b) {
   return out;
 }
 
-function mergeStats(a, b) {
+function mergeStats(a, b, prefer) {
+  if (prefer) {
+    const [first, second] = sides(a, b, prefer);
+    return { ...second, ...first };          // 优先方说了算，包括把日期改早
+  }
   const out = {};
   for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
     out[k] = (a[k] || '') >= (b[k] || '') ? a[k] || '' : b[k] || '';
@@ -237,26 +262,42 @@ function mergeStats(a, b) {
   return out;
 }
 
-/** 每天每语言取较大的已答数 —— 两端都答过时以多的为准，不会互相抵消 */
-function mergeDone(a, b) {
+/** 打卡日期。指定 prefer 时整份替换而非求并集 —— 否则一端删掉的会被另一端带回来 */
+function mergeDays(a, b, prefer) {
+  if (prefer === 'local') return [...new Set(a)].sort().length ? [...new Set(a)].sort() : [...new Set(b)].sort();
+  if (prefer === 'remote') return [...new Set(b)].sort().length ? [...new Set(b)].sort() : [...new Set(a)].sort();
+  return [...new Set([...a, ...b])].sort();
+}
+
+/** 每天每语言答了多少题 */
+function mergeDone(a, b, prefer) {
   const out = {};
   for (const day of new Set([...Object.keys(a), ...Object.keys(b)])) {
     const la = a[day] || {}, lb = b[day] || {};
-    const slot = {};
-    for (const k of new Set([...Object.keys(la), ...Object.keys(lb)])) {
-      slot[k] = Math.max(Number(la[k]) || 0, Number(lb[k]) || 0);
+    if (prefer) {
+      const [first, second] = sides(la, lb, prefer);
+      const slot = {};
+      for (const k of Object.keys(second)) slot[k] = Number(second[k]) || 0;
+      for (const [k, v] of Object.entries(first)) slot[k] = Number(v) || 0;
+      out[day] = slot;
+    } else {
+      const slot = {};
+      for (const k of new Set([...Object.keys(la), ...Object.keys(lb)])) {
+        slot[k] = Math.max(Number(la[k]) || 0, Number(lb[k]) || 0);
+      }
+      out[day] = slot;
     }
-    out[day] = slot;
   }
   return out;
 }
 
-function mergeMistakes(a, b) {
+function mergeMistakes(a, b, prefer) {
   const out = {};
   for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
     const ra = a[k], rb = b[k];
     if (!ra) out[k] = rb;
     else if (!rb) out[k] = ra;
+    else if (prefer) out[k] = prefer === 'local' ? ra : rb;
     else out[k] = (rb.t || 0) >= (ra.t || 0) ? rb : ra;
   }
   return out;

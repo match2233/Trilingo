@@ -50,7 +50,7 @@ export function emptyState() {
     updated: '',
     words: { en: [], jp: [] },
     edits: {},
-    base: { stats: {}, mistakes: {}, days: [], done: {} },
+    base: { stats: {}, mistakes: {}, days: [], done: {}, dropped: {} },
     events: [],
   };
 }
@@ -69,6 +69,9 @@ export function derive(state) {
   // "今天做了多少"的依据 —— 光有 days 只能判断打卡, 判断不了进度。
   const done = {};
   for (const [d, langs] of Object.entries(base.done || {})) done[d] = { ...langs };
+  // 人工移出错题本的词：{key: 移出时刻}。必须记在 base 里 ——
+  // 只删派生出来的那份列表是删不掉的，下次推导又会还原回来。
+  const dropped = { ...(base.dropped || {}) };
 
   const events = [...(state.events || [])].sort(
     (a, b) => (a.t || 0) - (b.t || 0) || (a.i < b.i ? -1 : a.i > b.i ? 1 : 0)
@@ -89,6 +92,9 @@ export function derive(state) {
     const slot = daily[day][lang];
     if (!slot.answered.includes(word)) slot.answered.push(word);
     if (e.o) slot.ok += 1;
+
+    // 移出之后又答错了，说明是真的不会，重新收进错题本
+    if (key in dropped && ts > dropped[key]) delete dropped[key];
 
     const m = mistakes[key];
     if (!e.o) {
@@ -113,7 +119,10 @@ export function derive(state) {
     }
   }
 
-  return { stats, mistakes, days, daily, done };
+  // 仍在"已移出"名单里的词，不进错题本
+  for (const key of Object.keys(dropped)) delete mistakes[key];
+
+  return { stats, mistakes, days, daily, done, dropped };
 }
 
 export function nextDue(m) {
@@ -195,6 +204,7 @@ export function merge(local, remote, prefer = null) {
     mistakes: mergeMistakes(lb.mistakes || {}, rb.mistakes || {}, prefer),
     days: mergeDays(lb.days || [], rb.days || [], prefer),
     done: mergeDone(lb.done || {}, rb.done || {}, prefer),
+    dropped: mergeDropped(lb.dropped || {}, rb.dropped || {}, prefer),
   };
 
   const seen = {};
@@ -291,6 +301,15 @@ function mergeDone(a, b, prefer) {
   return out;
 }
 
+/** 人工移出错题本的名单，取两端并集（任一端移出过就算移出） */
+function mergeDropped(a, b, prefer) {
+  if (prefer) {
+    const [first, second] = sides(a, b, prefer);
+    return { ...second, ...first };
+  }
+  return { ...b, ...a };
+}
+
 function mergeMistakes(a, b, prefer) {
   const out = {};
   for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
@@ -316,6 +335,7 @@ function normalize(state) {
     mistakes: base.mistakes || {},
     days: [...new Set(base.days || [])].sort(),
     done: base.done || {},
+    dropped: base.dropped || {},
   };
   out.words = out.words || { en: [], jp: [] };
   out.words.en = out.words.en || [];
@@ -337,7 +357,8 @@ function compact(state, todayStr) {
     stats: der.stats,
     mistakes: der.mistakes,
     days: [...der.days].sort(),
-    done: der.done,       // 折叠后仍要保留"每天做了多少"
+    done: der.done,           // 折叠后仍要保留"每天做了多少"
+    dropped: der.dropped,     // 人工移出的名单同样要保留
   };
   state.events = keep;
   return state;

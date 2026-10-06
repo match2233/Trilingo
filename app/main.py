@@ -39,6 +39,15 @@ def main() -> int:
     if snap:
         log.info("数据库快照: %s", snap)
 
+    # 自愈: 补齐历史缺失的事件, 再按事件流重建错题本表
+    try:
+        n = db.repair_events_from_plan()
+        if n:
+            log.info("补齐历史事件 %d 条", n)
+        db.refresh_mistakes()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("启动自愈失败: %s", exc)
+
     app = TrilingoApp(db)
 
     def report(exc, val, tb):

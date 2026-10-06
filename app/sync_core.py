@@ -25,7 +25,8 @@
     "stats":    {"en:shrug": "2026-09-10"},          # 最后学习日
     "mistakes": {"jp:学生": {"a":"2026-09-14","s":1,"e":2,"g":0,"t":1758}},
     "days":     ["2026-09-14", "2026-09-15"],        # 已完成(打卡)的日期
-    "done":     {"2026-09-14": {"en": 7, "jp": 15}}  # 当天各语言已答题数
+    "done":     {"2026-09-14": {"en": 7, "jp": 15}}, # 当天各语言已答题数
+    "dropped":  {"jp:学生": 1758}                    # 人工移出错题本的词 -> 何时移出的
   },
   "events": [{"i":"...","t":1758...,"d":"pc","l":"en","w":"shrug","o":1,"day":"2026-09-18"}]
 }
@@ -104,6 +105,9 @@ def derive(state: dict) -> dict:
         d: {k: int(v) for k, v in (langs or {}).items()}
         for d, langs in (base.get("done") or {}).items()
     }
+    # 人工移出错题本的词: {key: 移出时刻}. 它必须记在 base 里 ——
+    # 只删 mistakes 表是删不掉它的, 那张表由本函数重建, 下次就会被还原回来。
+    dropped: dict[str, int] = dict(base.get("dropped") or {})
 
     events = sorted(
         state.get("events") or [],
@@ -125,6 +129,10 @@ def derive(state: dict) -> dict:
             slot["answered"].append(word)
         if e.get("o"):
             slot["ok"] += 1
+
+        # 移出之后又答错了, 说明它是真的不会, 重新收进错题本
+        if key in dropped and ts > dropped[key]:
+            dropped.pop(key, None)
 
         m = mistakes.get(key)
         if not e.get("o"):
@@ -149,7 +157,12 @@ def derive(state: dict) -> dict:
             if n >= daily_target(lang):
                 days.add(day)
 
-    return {"stats": stats, "mistakes": mistakes, "days": days, "daily": daily, "done": done}
+    # 仍在"已移出"名单里的词, 不进错题本
+    for key in dropped:
+        mistakes.pop(key, None)
+
+    return {"stats": stats, "mistakes": mistakes, "days": days,
+            "daily": daily, "done": done, "dropped": dropped}
 
 
 def next_due(m: dict) -> str | None:
@@ -235,6 +248,7 @@ def merge(local: dict, remote: dict, prefer: str | None = None) -> dict:
         "mistakes": _merge_mistakes(lb.get("mistakes") or {}, rb.get("mistakes") or {}, prefer),
         "days": _merge_days(lb.get("days") or [], rb.get("days") or [], prefer),
         "done": _merge_done(lb.get("done") or {}, rb.get("done") or {}, prefer),
+        "dropped": _merge_dropped(lb.get("dropped") or {}, rb.get("dropped") or {}, prefer),
     }
 
     # 事件按 id 去重后取并集
@@ -333,6 +347,18 @@ def _merge_done(a: dict, b: dict, prefer: str | None = None) -> dict:
     return out
 
 
+def _merge_dropped(a: dict, b: dict, prefer: str | None = None) -> dict:
+    """人工移出错题本的名单, 取两端并集 (任一端移出过就算移出)."""
+    if prefer:
+        first, second = _sides(a, b, prefer)
+        out = dict(second)
+        out.update(first)
+        return out
+    out = dict(b)
+    out.update(a)
+    return out
+
+
 def _merge_mistakes(a: dict, b: dict, prefer: str | None = None) -> dict:
     out: dict[str, dict] = {}
     for key in set(a) | set(b):
@@ -360,6 +386,7 @@ def _normalize(state: dict) -> dict:
         "mistakes": base.get("mistakes") or {},
         "days": sorted(set(base.get("days") or [])),
         "done": base.get("done") or {},
+        "dropped": base.get("dropped") or {},
     }
     for lang in ("en", "jp"):
         out["words"].setdefault(lang, [])
@@ -386,7 +413,8 @@ def _compact(state: dict, today: str | None = None) -> dict:
         "stats": der["stats"],
         "mistakes": der["mistakes"],
         "days": sorted(der["days"]),
-        "done": der["done"],       # 折叠后仍要保留"每天做了多少"
+        "done": der["done"],           # 折叠后仍要保留"每天做了多少"
+        "dropped": der["dropped"],     # 人工移出的名单同样要保留
     }
     state["events"] = keep
     return state
@@ -460,7 +488,7 @@ def build_base_from_db(db, today: str | None = None) -> dict:
             done.setdefault(r["day"], {})[r["lang"]] = int(r["a"])
 
     return {"stats": stats, "mistakes": mistakes,
-            "days": sorted(set(days)), "done": done}
+            "days": sorted(set(days)), "done": done, "dropped": {}}
 
 
 def streak(days: set[str], today: str | None = None) -> int:

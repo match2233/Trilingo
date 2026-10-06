@@ -326,6 +326,13 @@ class Database:
         写事件, 两边会分家, 表现为"错题到期了却不出现"。
         """
         der = self.derived_state()
+
+        # 已经失效的"移出"记录要清掉: 推导时靠时间戳能绕过它, 但留着会越积越多
+        base = self.get_base()
+        if set(base.get("dropped") or {}) != set(der.get("dropped") or {}):
+            base["dropped"] = der.get("dropped") or {}
+            self.set_base(base)
+
         ids: dict[str, int] = {}
         for lang, table in (("en", "en_words"), ("jp", "jp_words")):
             for r in self.conn.execute(f"SELECT id, word FROM {table}"):
@@ -402,7 +409,21 @@ class Database:
         return r["c"] if r else 0
 
     def remove_mistake(self, lang: str, word_id: int) -> None:
-        self.conn.execute("DELETE FROM mistakes WHERE lang=? AND word_id=?", (lang, word_id))
+        """把单词永久移出错题本.
+
+        mistakes 表是**派生缓存**, 直接删表没有用 —— 下一次 refresh_mistakes
+        就会把它从 base + 事件重建回来, 表现就是"移出后重开软件又回来了"。
+        必须把"移出"这件事记进权威状态 base。
+        """
+        table = "en_words" if lang == "en" else "jp_words"
+        row = self.conn.execute(f"SELECT word FROM {table} WHERE id=?", (word_id,)).fetchone()
+        if row is None:
+            return
+        base = self.get_base()
+        dropped = base.setdefault("dropped", {})
+        dropped[f"{lang}:{row['word']}"] = int(dt.datetime.now().timestamp())
+        self.set_base(base)
+        self.refresh_mistakes()
         self.conn.commit()
 
     # ------------------------------------------------------------ 每日计划
@@ -599,6 +620,40 @@ class Database:
         self.refresh_mistakes()
         self.conn.commit()
         return {"rolled": rolled, "events": n_ev}
+
+    def repair_events_from_plan(self) -> int:
+        """把「计划里已答、但事件流里没有」的记录补成事件.
+
+        早期版本的作答没有写事件流, 于是错题本推不出这些作答的效果 ——
+        表现就是"明明做完了, 错题本却毫无变化"。
+
+        补的时候要跳过 base 已覆盖的日期: 那些作答的效果早已并入快照,
+        再补一遍会重复计算。
+        """
+        base = self.get_base()
+        covered = set(base.get("days") or [])
+        covered |= set((base.get("done") or {}).keys())
+        covered |= {d for d in (base.get("stats") or {}).values() if d}
+        horizon = max(covered) if covered else ""
+
+        fixed = 0
+        for lang, table in (("en", "en_words"), ("jp", "jp_words")):
+            rows = self.conn.execute(
+                f"SELECT p.day AS day, p.correct AS correct, w.word AS word"
+                f" FROM daily_plan p JOIN {table} w ON w.id = p.word_id"
+                " WHERE p.lang=? AND p.answered=1 AND p.day > ?"
+                "   AND NOT EXISTS (SELECT 1 FROM events e"
+                "                   WHERE e.day=p.day AND e.lang=p.lang AND e.word=w.word)",
+                (lang, horizon),
+            ).fetchall()
+            for r in rows:
+                self.add_event(lang, r["word"], bool(r["correct"]), r["day"], device="repair")
+                fixed += 1
+
+        if fixed:
+            self.refresh_mistakes()
+            self.conn.commit()
+        return fixed
 
     def _done_from_plan(self) -> dict:
         """每天每门语言已答多少题 —— 从当日计划统计."""

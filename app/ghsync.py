@@ -21,6 +21,7 @@ from pathlib import Path
 
 from . import sync_core as sc
 from .config import DATA_DIR
+from .db import today as _today
 
 log = logging.getLogger("trilingo")
 
@@ -231,6 +232,13 @@ def apply_state_to_db(db, state: dict) -> None:
     # 顺序不能反: 先用 base.mistakes 铺出"事件流之前"的起始状态, 再往上播事件。
     # base 是事件发生**之前**的快照 —— 先播事件再从 0 重算, 会把事件之前的
     # 档位整段丢掉, 表现就是另一台设备的档位普遍低一档。
+    #
+    # 但补齐**只能是加法**: 本机错题本里已经有这条时, 一律以本机为准。
+    # base 是冻结的旧快照, 它不包含本机此后做的任何一次复习 —— 早先这里用
+    # "先 DELETE 再 INSERT" 直接覆盖本机记录, 于是每同步一次就把本机刚答对
+    # 推进的档位打回快照里的旧档位, 复习日也跟着退回过去, 错题本里那个词
+    # 就永远显示「今日待复习」, 怎么复习都消不掉。本机自己维护的表是权威,
+    # 快照只用来补本机**缺失**的历史条目。
     for key, m in (base.get("mistakes") or {}).items():
         lang, _, word = key.partition(":")
         if not word:
@@ -244,9 +252,6 @@ def apply_state_to_db(db, state: dict) -> None:
         if db.conn.execute("SELECT 1 FROM dropped_words WHERE lang=? AND word=?",
                            (lang, word)).fetchone():
             continue
-        # 以对方为准: 直接覆盖本机这一条的档位。事件流之前就存在的档位
-        # 不在任何事件里, 不覆盖的话本机只能从 0 重算, 档位会普遍偏低。
-        db.conn.execute("DELETE FROM mistakes WHERE lang=? AND word_id=?", (lang, row["id"]))
         db.conn.execute(
             "INSERT OR IGNORE INTO mistakes (lang,word_id,anchor_date,stage,next_due,"
             "graduated,error_count,last_error_at,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -255,8 +260,19 @@ def apply_state_to_db(db, state: dict) -> None:
         )
     db.conn.commit()
 
-    # 再播事件: 跳过本机已应用的, 以及对方快照已覆盖的
-    db.apply_remote_events(state.get("events") or [],
+    # 再播事件: 跳过本机已应用的, 以及对方快照已覆盖的。
+    #
+    # 「快照已覆盖」还要按**日期**再挡一层: base.done 里出现过的那几天, 其作答
+    # 效果已经并入 base.mistakes 了, 再播一遍就是重复计算 —— 表现是另一台设备
+    # 的档位和出错次数比电脑端偏高(实测 75 条里 72 条对不上)。
+    #
+    # 只挡**今天之前**的日期: 今天的作答可能正好发生在拍快照之后, base 里没有
+    # 它们的效果, 挡掉就等于把对方今天的进度整段丢掉(实测会丢 4 条新错题)。
+    # 今天的重复由上面的 base.mistakes 补齐 + applied_events 一起兜住。
+    folded_days = {d for d in (base.get("done") or {}) if d and d < _today()}
+    pending = [e for e in (state.get("events") or [])
+               if (e.get("day") or "") not in folded_days]
+    db.apply_remote_events(pending,
                            since_ts=int(base.get("folded_ts") or 0),
                            folded=base.get("folded") or {})
 

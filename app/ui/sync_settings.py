@@ -121,9 +121,10 @@ class SyncDialog(tk.Toplevel):
 
         def worker():
             try:
-                r = ghsync.sync(self.app.db, device="pc")
-                ok, msg = True, (f"同步完成。事件 {r['events']} 条，错题 {r['mistakes']} 条，"
-                                 f"打卡 {r['days']} 天。" + ("" if r["changed"] else "（无变化）"))
+                # 走独立连接: 同步重建错题本表期间, 界面读到的会是提交前或
+                # 提交后的完整状态, 不会撞见"删除后还没插回"的空档
+                r = self.app.sync_worker(lambda sdb: ghsync.sync(sdb, device="pc"))
+                ok, msg = True, "同步完成" + ("" if r["changed"] else "（无变化）")
             except Exception as exc:  # noqa: BLE001
                 ok, msg = False, str(exc)
 

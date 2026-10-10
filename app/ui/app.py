@@ -87,6 +87,24 @@ class TrilingoApp(tk.Tk):
             f.on_show()
 
     # ------------------------------------------------------------ 同步
+    def sync_worker(self, fn):
+        """在**独立连接**上执行同步相关的数据库操作.
+
+        界面线程与后台同步线程共用同一个 sqlite 连接会互相踩: 同步在重建
+        错题本表时是"先 DELETE 再逐条 INSERT", 界面若正好在那一刻读, 会读到
+        空表 —— 表现就是"网络不好时错题本读不出来"。各自一个连接之后,
+        SQLite 的事务隔离保证界面读到的是提交前或提交后的完整状态, 不会看到
+        中间态; 网络慢也只是让同步整体更久一点, 不再影响本机读写。
+        """
+        from .. import config as C
+        from ..db import Database
+
+        sdb = Database(C.DB_PATH)
+        try:
+            return fn(sdb)
+        finally:
+            sdb.close()
+
     def auto_sync(self, on_done=None) -> None:
         """后台静默同步一次. 未配置或失败都不打扰用户, 只记日志."""
         from .. import ghsync
@@ -101,22 +119,20 @@ class TrilingoApp(tk.Tk):
 
         def worker():
             try:
-                # 标记了 force_push 时改为"以本机覆盖云端"。
-                # 重置进度后必须这样, 否则启动时的常规同步会把云端刚被清掉的
-                # 数据重新合并回来 —— 并集语义下, 本机删掉的东西删不掉。
-                if self.db.meta_get("force_push", "") == "1":
-                    r = ghsync.push_state(self.db, message="reset: overwrite remote")
-                    self.db.meta_set("force_push", "")
-                    log.info("已覆盖云端: %s", r)
-                    msg = f"已用本机数据覆盖云端（{r['sha']}）· 重置完成"
-                else:
-                    r = ghsync.sync(self.db, device="pc")
-                    log.info("自动同步完成: %s", r)
-                    msg = (f"同步完成 · 事件 {r['events']} · 错题 {r['mistakes']} "
-                           f"· 打卡 {r['days']} 天")
+                def job(sdb):
+                    # 标记了 force_push 时改为"以本机覆盖云端"。
+                    if sdb.meta_get("force_push", "") == "1":
+                        r = ghsync.push_state(sdb, message="reset: overwrite remote")
+                        sdb.meta_set("force_push", "")
+                        return True, r
+                    return False, ghsync.sync(sdb, device="pc")
+
+                forced, r = self.sync_worker(job)
+                log.info("自动同步完成: %s", r)
+                msg = "已用本机数据覆盖云端" if forced else "同步完成"
             except Exception as exc:  # noqa: BLE001
                 log.warning("自动同步失败: %s", exc)
-                msg = f"同步失败：{exc}"
+                msg = "同步失败（本机数据不受影响）"
             try:
                 self.after(0, lambda: (self.set_sync_notice(msg), on_done and on_done()))
             except Exception:
@@ -271,9 +287,11 @@ class MenuFrame(tk.Frame):
             else:
                 btn.set_subtitle(f"{n} 个错词")
 
-        # 同步状态优先显示, 方便一眼看出手机端的数据有没有拉过来
-        parts = [t for t in (self.app._sync_notice, self.app._enrich_notice) if t]
-        self.notice.configure(text="　·　".join(parts))
+        # 只显示同步结果, 不堆砌统计数字; 补全过程有告警时才额外提示
+        notice = self.app._sync_notice
+        if "⚠" in (self.app._enrich_notice or ""):
+            notice = f"{notice}　·　{self.app._enrich_notice}".strip("　·　")
+        self.notice.configure(text=notice)
 
         from .. import ghsync
 

@@ -108,6 +108,10 @@ def derive(state: dict) -> dict:
     # 人工移出错题本的词: {key: 移出时刻}. 它必须记在 base 里 ——
     # 只删 mistakes 表是删不掉它的, 那张表由本函数重建, 下次就会被还原回来。
     dropped: dict[str, int] = dict(base.get("dropped") or {})
+    # 快照已覆盖到的时间点。早于它的事件不再重复计入 —— 它们的效果已经在
+    # base 里了。用"跳过"代替"删除", 这样即使快照被重建, 事件也不会丢:
+    # 删掉的事件是不可再生的, 而跳过只是暂时不参与计算。
+    folded_ts = int(base.get("folded_ts") or 0)
 
     events = sorted(
         state.get("events") or [],
@@ -115,6 +119,8 @@ def derive(state: dict) -> dict:
     )
 
     for e in events:
+        if e.get("t", 0) <= folded_ts:
+            continue          # 已并入 base, 跳过
         lang, word = e.get("l", ""), e.get("w", "")
         if not lang or not word:
             continue
@@ -249,6 +255,9 @@ def merge(local: dict, remote: dict, prefer: str | None = None) -> dict:
         "days": _merge_days(lb.get("days") or [], rb.get("days") or [], prefer),
         "done": _merge_done(lb.get("done") or {}, rb.get("done") or {}, prefer),
         "dropped": _merge_dropped(lb.get("dropped") or {}, rb.get("dropped") or {}, prefer),
+        # 折叠点必须跟随它所描述的那个 base, 不能取 max:
+        # 若取了另一端的较大值, 会有事件被跳过而这端的 base 里并没有它们的效果
+        "folded_ts": int((lb if prefer != "remote" else rb).get("folded_ts") or 0),
     }
 
     # 事件按 id 去重后取并集
@@ -387,6 +396,7 @@ def _normalize(state: dict) -> dict:
         "days": sorted(set(base.get("days") or [])),
         "done": base.get("done") or {},
         "dropped": base.get("dropped") or {},
+        "folded_ts": int(base.get("folded_ts") or 0),
     }
     for lang in ("en", "jp"):
         out["words"].setdefault(lang, [])
@@ -415,6 +425,8 @@ def _compact(state: dict, today: str | None = None) -> dict:
         "days": sorted(der["days"]),
         "done": der["done"],           # 折叠后仍要保留"每天做了多少"
         "dropped": der["dropped"],     # 人工移出的名单同样要保留
+        # 记下折叠到哪一刻, 推导时据此跳过这段事件
+        "folded_ts": max((e.get("t", 0) for e in old), default=0),
     }
     state["events"] = keep
     return state
@@ -442,7 +454,7 @@ def apply_edits(state: dict) -> None:
         rec["manual"] = 1
 
 
-def build_base_from_db(db, today: str | None = None) -> dict:
+def build_base_from_db(db, today: str | None = None, folded_ts: int = 0) -> dict:
     """把 PC 现有 SQLite 状态压成 base, 用于首次同步的引导.
 
     历史答题的逐条记录无法还原, 因此已有的错题本与学习次数直接作为起点,
@@ -488,7 +500,8 @@ def build_base_from_db(db, today: str | None = None) -> dict:
             done.setdefault(r["day"], {})[r["lang"]] = int(r["a"])
 
     return {"stats": stats, "mistakes": mistakes,
-            "days": sorted(set(days)), "done": done, "dropped": {}}
+            "days": sorted(set(days)), "done": done, "dropped": {},
+            "folded_ts": int(folded_ts or 0)}
 
 
 def streak(days: set[str], today: str | None = None) -> int:

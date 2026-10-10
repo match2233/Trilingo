@@ -287,11 +287,9 @@ class MenuFrame(tk.Frame):
             else:
                 btn.set_subtitle(f"{n} 个错词")
 
-        # 只显示同步结果, 不堆砌统计数字; 补全过程有告警时才额外提示
-        notice = self.app._sync_notice
-        if "⚠" in (self.app._enrich_notice or ""):
-            notice = f"{notice}　·　{self.app._enrich_notice}".strip("　·　")
-        self.notice.configure(text=notice)
+        # 同步状态 + 补全结果, 都显示（同步那条不含统计数字）
+        parts = [t for t in (self.app._sync_notice, self.app._enrich_notice) if t]
+        self.notice.configure(text="　·　".join(parts))
 
         from .. import ghsync
 

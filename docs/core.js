@@ -72,12 +72,16 @@ export function derive(state) {
   // 人工移出错题本的词：{key: 移出时刻}。必须记在 base 里 ——
   // 只删派生出来的那份列表是删不掉的，下次推导又会还原回来。
   const dropped = { ...(base.dropped || {}) };
+  // 快照已覆盖到的时间点。早于它的事件不再重复计入 —— 效果已在 base 里。
+  // 用"跳过"代替"删除": 事件是不可再生的, 跳过只是暂时不参与计算。
+  const foldedTs = Number(base.folded_ts) || 0;
 
   const events = [...(state.events || [])].sort(
     (a, b) => (a.t || 0) - (b.t || 0) || (a.i < b.i ? -1 : a.i > b.i ? 1 : 0)
   );
 
   for (const e of events) {
+    if ((e.t || 0) <= foldedTs) continue;   // 已并入 base，跳过
     const lang = e.l || '';
     const word = e.w || '';
     if (!lang || !word) continue;
@@ -205,6 +209,9 @@ export function merge(local, remote, prefer = null) {
     days: mergeDays(lb.days || [], rb.days || [], prefer),
     done: mergeDone(lb.done || {}, rb.done || {}, prefer),
     dropped: mergeDropped(lb.dropped || {}, rb.dropped || {}, prefer),
+    // 折叠点必须跟随它所描述的那个 base，不能取 max：若取了另一端的较大值，
+    // 会有事件被跳过而这端的 base 里并没有它们的效果
+    folded_ts: Number((prefer === 'remote' ? rb : lb).folded_ts) || 0,
   };
 
   const seen = {};
@@ -336,6 +343,7 @@ function normalize(state) {
     days: [...new Set(base.days || [])].sort(),
     done: base.done || {},
     dropped: base.dropped || {},
+    folded_ts: Number(base.folded_ts) || 0,
   };
   out.words = out.words || { en: [], jp: [] };
   out.words.en = out.words.en || [];
@@ -359,6 +367,8 @@ function compact(state, todayStr) {
     days: [...der.days].sort(),
     done: der.done,           // 折叠后仍要保留"每天做了多少"
     dropped: der.dropped,     // 人工移出的名单同样要保留
+    // 记下折叠到哪一刻，推导时据此跳过这段事件
+    folded_ts: old.reduce((m, e) => Math.max(m, e.t || 0), 0),
   };
   state.events = keep;
   return state;

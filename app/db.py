@@ -566,10 +566,11 @@ class Database:
             except Exception:
                 pass
 
-        base = sc.build_base_from_db(self)
+        # 快照现有的全部状态。**不删事件**: 靠 folded_ts 让推导跳过它们即可
+        # —— 删掉的事件是不可再生的, 一旦快照重建就永久丢失。
+        row = self.conn.execute("SELECT COALESCE(MAX(ts), 0) t FROM events").fetchone()
+        base = sc.build_base_from_db(self, folded_ts=int(row["t"] or 0))
         self.meta_set("sync_base", json.dumps(base, ensure_ascii=False))
-        # 已有事件的效果已并入 base, 从事件表移除以免重复计入
-        self.conn.execute("DELETE FROM events")
         self.conn.commit()
         return base
 
@@ -629,32 +630,46 @@ class Database:
         早期版本的作答没有写事件流, 于是错题本推不出这些作答的效果 ——
         表现就是"明明做完了, 错题本却毫无变化"。
 
-        补的时候要跳过 base 已覆盖的日期: 那些作答的效果早已并入快照,
-        再补一遍会重复计算。
+        判断依据是**数量**, 不是日期: 逐 (日期, 语言) 比较「计划里已答多少」
+        与「base 里记了多少」。只有当计划明显更多时, 才说明有作答没进事件流。
+        按日期整体跳过是不对的 —— 同一天可能一部分作进了快照、另一部分没有。
         """
         base = self.get_base()
-        covered = set(base.get("days") or [])
-        covered |= set((base.get("done") or {}).keys())
-        covered |= {d for d in (base.get("stats") or {}).values() if d}
-        horizon = max(covered) if covered else ""
+        base_done = base.get("done") or {}
+        day = today()
+        done_key = f"repaired:{day}"
+
+        # 只处理当天, 且当天只补一次 —— 历史日期要么已在 base 里、要么已同步,
+        # 反复补会把同一次作答算两遍。留个标记避免重复。
+        if self.meta_get(done_key, "") == "1":
+            return 0
 
         fixed = 0
         for lang, table in (("en", "en_words"), ("jp", "jp_words")):
-            rows = self.conn.execute(
-                f"SELECT p.day AS day, p.correct AS correct, w.word AS word"
-                f" FROM daily_plan p JOIN {table} w ON w.id = p.word_id"
-                " WHERE p.lang=? AND p.answered=1 AND p.day > ?"
-                "   AND NOT EXISTS (SELECT 1 FROM events e"
-                "                   WHERE e.day=p.day AND e.lang=p.lang AND e.word=w.word)",
-                (lang, horizon),
+            days = self.conn.execute(
+                "SELECT day, COALESCE(SUM(answered), 0) a FROM daily_plan"
+                " WHERE lang=? AND answered=1 AND day=? GROUP BY day",
+                (lang, day),
             ).fetchall()
-            for r in rows:
-                self.add_event(lang, r["word"], bool(r["correct"]), r["day"], device="repair")
-                fixed += 1
+            for d in days:
+                if (d["a"] or 0) <= int((base_done.get(day) or {}).get(lang) or 0):
+                    continue      # 这一天的作答已经体现在 base 里了
+                rows = self.conn.execute(
+                    f"SELECT p.correct AS correct, w.word AS word"
+                    f" FROM daily_plan p JOIN {table} w ON w.id = p.word_id"
+                    " WHERE p.day=? AND p.lang=? AND p.answered=1"
+                    "   AND NOT EXISTS (SELECT 1 FROM events e"
+                    "                   WHERE e.day=p.day AND e.lang=p.lang AND e.word=w.word)",
+                    (day, lang),
+                ).fetchall()
+                for r in rows:
+                    self.add_event(lang, r["word"], bool(r["correct"]), day, device="repair")
+                    fixed += 1
 
+        self.meta_set(done_key, "1")
         if fixed:
             self.refresh_mistakes()
-            self.conn.commit()
+        self.conn.commit()
         return fixed
 
     def _done_from_plan(self) -> dict:

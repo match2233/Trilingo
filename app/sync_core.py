@@ -512,8 +512,16 @@ def build_base_from_db(db, today: str | None = None, folded_ts: int = 0) -> dict
         if r["a"]:
             done.setdefault(r["day"], {})[r["lang"]] = int(r["a"])
 
+    # 人工移出的名单也要带上, 否则另一台设备会把它们又收进错题本
+    dropped: dict[str, int] = {}
+    try:
+        for r in db.conn.execute("SELECT lang, word, at FROM dropped_words"):
+            dropped[key_of(r["lang"], r["word"])] = int(r["at"] or 0)
+    except Exception:
+        pass
+
     return {"stats": stats, "mistakes": mistakes,
-            "days": sorted(set(days)), "done": done, "dropped": {},
+            "days": sorted(set(days)), "done": done, "dropped": dropped,
             "folded_ts": int(folded_ts or 0)}
 
 

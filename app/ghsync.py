@@ -154,6 +154,11 @@ def state_from_db(db, words_en: bool = True) -> dict:
     """把本地 SQLite 组装成同步状态."""
     state = sc.empty_state()
     state["base"] = db.get_base()
+    # 移出名单以本地表为准: 快照是冻结的, 不会跟着人工移出而变
+    state["base"]["dropped"] = {
+        f"{r['lang']}:{r['word']}": int(r["at"] or 0)
+        for r in db.conn.execute("SELECT lang, word, at FROM dropped_words")
+    }
     state["words"] = {
         "en": [
             {"w": r["word"], "m": r["meaning"] or "", "ipa": r["ipa"] or "",
@@ -179,17 +184,81 @@ def state_from_db(db, words_en: bool = True) -> dict:
 
 
 def apply_state_to_db(db, state: dict) -> None:
-    """把合并后的状态写回 SQLite (重建错题本、学习统计、打卡记录)."""
-    sc.apply_edits(state)
-    der = sc.derive(state)
+    """把合并后的状态应用到本机.
 
-    # 词条: 合并进来的释义/音标/声调 (人工编辑优先, 不覆盖本地 manual)
+    错题本**不做整表重建** —— 它是本机自己维护的权威数据, 重建会把人工移出、
+    立即复习等本地操作一并抹掉。这里只做两件加法:
+      1. 把另一台设备的作答事件逐条应用上去 (已有的不重复)
+      2. 合并词条释义/音标/声调
+    """
+    sc.apply_edits(state)
+
     for rec in state["words"].get("en") or []:
         db.apply_synced_en(rec)
     for rec in state["words"].get("jp") or []:
         db.apply_synced_jp(rec)
 
-    db.rebuild_from_state(der)
+    # 历史状态 (事件流之前就存在的作答) 也要并进来 —— 那些词没有事件可播,
+    # 只靠事件流另一台设备会以为它们从没学过。
+    base = state.get("base") or {}
+    for key, day in (base.get("stats") or {}).items():
+        lang, _, word = key.partition(":")
+        if not word:
+            continue
+        table = "en_words" if lang == "en" else "jp_words"
+        db.conn.execute(
+            f"UPDATE {table} SET last_studied=? WHERE word=?"
+            " AND (last_studied IS NULL OR last_studied<?)",
+            (day, word, day),
+        )
+
+    # 另一台设备移出过的词, 本机也移出
+    for key, at in (state.get("base", {}).get("dropped") or {}).items():
+        lang, _, word = key.partition(":")
+        if not word:
+            continue
+        table = "en_words" if lang == "en" else "jp_words"
+        row = db.conn.execute(f"SELECT id FROM {table} WHERE word=?", (word,)).fetchone()
+        if row is None:
+            continue
+        db.conn.execute(
+            "INSERT INTO dropped_words (lang,word,at) VALUES (?,?,?)"
+            " ON CONFLICT(lang,word) DO UPDATE SET at=excluded.at",
+            (lang, word, int(at or 0)),
+        )
+        db.conn.execute("DELETE FROM mistakes WHERE lang=? AND word_id=?", (lang, row["id"]))
+
+    # 顺序不能反: 先用 base.mistakes 铺出"事件流之前"的起始状态, 再往上播事件。
+    # base 是事件发生**之前**的快照 —— 先播事件再从 0 重算, 会把事件之前的
+    # 档位整段丢掉, 表现就是另一台设备的档位普遍低一档。
+    for key, m in (base.get("mistakes") or {}).items():
+        lang, _, word = key.partition(":")
+        if not word:
+            continue
+        table = "en_words" if lang == "en" else "jp_words"
+        row = db.conn.execute(f"SELECT id FROM {table} WHERE word=?", (word,)).fetchone()
+        if row is None:
+            continue
+        # 人工移出过的词不要再插回来 —— 移出是用户的明确意图,
+        # 它比"历史上错过这个字"更重要
+        if db.conn.execute("SELECT 1 FROM dropped_words WHERE lang=? AND word=?",
+                           (lang, word)).fetchone():
+            continue
+        # 以对方为准: 直接覆盖本机这一条的档位。事件流之前就存在的档位
+        # 不在任何事件里, 不覆盖的话本机只能从 0 重算, 档位会普遍偏低。
+        db.conn.execute("DELETE FROM mistakes WHERE lang=? AND word_id=?", (lang, row["id"]))
+        db.conn.execute(
+            "INSERT OR IGNORE INTO mistakes (lang,word_id,anchor_date,stage,next_due,"
+            "graduated,error_count,last_error_at,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (lang, row["id"], m.get("a", ""), int(m.get("s", 0)),
+             sc.next_due(m) or "", 1 if m.get("g") else 0, int(m.get("e", 0)), "", _now()),
+        )
+    db.conn.commit()
+
+    # 再播事件: 跳过本机已应用的, 以及对方快照已覆盖的
+    db.apply_remote_events(state.get("events") or [],
+                           since_ts=int(base.get("folded_ts") or 0),
+                           folded=base.get("folded") or {})
 
 
 # ------------------------------------------------------------------ 主流程

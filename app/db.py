@@ -421,7 +421,9 @@ class Database:
             return
         base = self.get_base()
         dropped = base.setdefault("dropped", {})
-        dropped[f"{lang}:{row['word']}"] = int(dt.datetime.now().timestamp())
+        # 必须用**毫秒**: 事件流的时间戳是毫秒, 这里若写秒, 推导里
+        # 「事件时间 > 移出时间」会恒成立, 移出记录一写就失效。
+        dropped[f"{lang}:{row['word']}"] = int(dt.datetime.now().timestamp() * 1000)
         self.set_base(base)
         self.refresh_mistakes()
         self.conn.commit()

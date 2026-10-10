@@ -557,11 +557,31 @@ class Database:
         if raw:
             try:
                 base = json.loads(raw)
+                changed = False
                 if "done" not in base:
                     # 早期版本的快照没有 done 字段, 从当天计划补出来,
                     # 否则另一台设备看不到本机的完成进度
                     base["done"] = self._done_from_plan()
+                    changed = True
+                if not base.get("folded") and not base.get("folded_ts"):
+                    # 旧格式快照既没有折叠点也没有按天计数, 与现存事件互相重叠,
+                    # 同一次作答会被算两遍 —— 第二次遇到"答错"就把档位打了回去。
+                    # 用 done 补出"每天每语言已并入快照多少条", 正好描述其覆盖范围。
+                    # 今天要排除在外: 快照的 done 记了今天的作答数, 但 mistakes
+                    # 里未必反映了它们(两者会自相矛盾)。排除今天, 让补齐逻辑
+                    # 去补今天的缺失事件, 才能真正把进度推进回来。
+                    today = dt.date.today().isoformat()
+                    base["folded"] = {
+                        f"{d}|{lang}": int(c or 0)
+                        for d, langs in (base.get("done") or {}).items()
+                        if d != today
+                        for lang, c in (langs or {}).items()
+                        if c
+                    }
+                    changed = True
+                if changed:
                     self.meta_set("sync_base", json.dumps(base, ensure_ascii=False))
+                    self.conn.commit()
                 return base
             except Exception:
                 pass
@@ -652,8 +672,9 @@ class Database:
                 (lang, day),
             ).fetchall()
             for d in days:
-                if (d["a"] or 0) <= int((base_done.get(day) or {}).get(lang) or 0):
-                    continue      # 这一天的作答已经体现在 base 里了
+                # 不再用"计划已答数 vs 快照已记数"做守卫: 两者会自相矛盾
+                # (快照的 done 记了今天的作答数, mistakes 里却没有相应的推进),
+                # 据此跳过会把今天的进度丢掉。当天只补一次由上面的标记保证。
                 rows = self.conn.execute(
                     f"SELECT p.correct AS correct, w.word AS word"
                     f" FROM daily_plan p JOIN {table} w ON w.id = p.word_id"

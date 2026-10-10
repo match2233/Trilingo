@@ -112,6 +112,10 @@ def derive(state: dict) -> dict:
     # base 里了。用"跳过"代替"删除", 这样即使快照被重建, 事件也不会丢:
     # 删掉的事件是不可再生的, 而跳过只是暂时不参与计算。
     folded_ts = int(base.get("folded_ts") or 0)
+    # 按「日期|语言」记录快照里已经算进了多少次作答。旧格式快照只有这个
+    # 粒度能描述覆盖范围: 同一天可能一部分作答进了快照、另一部分没有。
+    folded = {k: int(v) for k, v in (base.get("folded") or {}).items()}
+    seen_pair: dict[str, int] = {}
 
     events = sorted(
         state.get("events") or [],
@@ -121,6 +125,11 @@ def derive(state: dict) -> dict:
     for e in events:
         if e.get("t", 0) <= folded_ts:
             continue          # 已并入 base, 跳过
+        pair = f"{e.get('day', '')}|{e.get('l', '')}"
+        n = seen_pair.get(pair, 0)
+        seen_pair[pair] = n + 1
+        if n < folded.get(pair, 0):
+            continue          # 这一天这门语言的前 N 条已并入 base, 不重复计
         lang, word = e.get("l", ""), e.get("w", "")
         if not lang or not word:
             continue
@@ -258,6 +267,7 @@ def merge(local: dict, remote: dict, prefer: str | None = None) -> dict:
         # 折叠点必须跟随它所描述的那个 base, 不能取 max:
         # 若取了另一端的较大值, 会有事件被跳过而这端的 base 里并没有它们的效果
         "folded_ts": int((lb if prefer != "remote" else rb).get("folded_ts") or 0),
+        "folded": dict((lb if prefer != "remote" else rb).get("folded") or {}),
     }
 
     # 事件按 id 去重后取并集
@@ -397,6 +407,7 @@ def _normalize(state: dict) -> dict:
         "done": base.get("done") or {},
         "dropped": base.get("dropped") or {},
         "folded_ts": int(base.get("folded_ts") or 0),
+        "folded": base.get("folded") or {},
     }
     for lang in ("en", "jp"):
         out["words"].setdefault(lang, [])
@@ -425,8 +436,10 @@ def _compact(state: dict, today: str | None = None) -> dict:
         "days": sorted(der["days"]),
         "done": der["done"],           # 折叠后仍要保留"每天做了多少"
         "dropped": der["dropped"],     # 人工移出的名单同样要保留
-        # 记下折叠到哪一刻, 推导时据此跳过这段事件
+        # 记下折叠到哪一刻, 推导时据此跳过这段事件。
+        # 折叠点已精确覆盖这些事件, 原先的按天计数就不再需要了。
         "folded_ts": max((e.get("t", 0) for e in old), default=0),
+        "folded": {},
     }
     state["events"] = keep
     return state

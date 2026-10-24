@@ -162,8 +162,8 @@ export function renderDeer() {
     const v = deerLevel(`${prefix}-${String(d).padStart(2, '0')}`);
     const bg = v === undefined ? '' : DEER_COLOR[v];
     const fg = v === undefined ? '' : DEER_TEXT[v];
-    cells += `<div class="deer-day" style="background:${bg || 'transparent'};color:${fg || 'var(--muted)'}">
-      ${v === undefined ? d : `<span>${d}</span><b style="font-size:10px">${v}</b>`}</div>`;
+    // 只靠底色表示等级, 格子里不再写鹿次数 (手机上格子小, 数字挤着看不清)
+    cells += `<div class="deer-day" style="background:${bg || 'transparent'};color:${fg || 'var(--muted)'}">${d}</div>`;
   }
   $('deerCal').innerHTML = cells;
   $('deerStat').textContent = `${y} 年 ${m + 1} 月　鹿次数 ${total}`;

@@ -1,11 +1,11 @@
-/* Service Worker —— 让应用离线可用（地铁里、飞行模式下也能背单词）。
+﻿/* Service Worker —— 让应用离线可用（地铁里、飞行模式下也能背单词）。
  *
  * 应用外壳走缓存优先（改版时把 CACHE 版本号加一即可失效重建）；
  * GitHub API 一律走网络、不缓存，避免读到过期的学习数据。
  */
 
 // 改动 docs/ 下的任何文件后, 把版本号加一, 否则手机会一直用缓存里的旧版本
-const CACHE = 'trilingo-v13';
+const CACHE = 'trilingo-v14';
 
 const SHELL = [
   './',

@@ -237,7 +237,7 @@ class LedgerFrame(tk.Frame):
         return theme.MUTED, theme.CARD, theme.MUTED, f"{sign}0.00"
 
     def _year_value(self, month: int):
-        """年视图: 每个月一个数值 = 当月结余 (收入 − 支出)."""
+        """年视图: 每个月一个数值 = 当月结余 (收入 − 支出), 底色随正负变化."""
         cur = self.currency.get()
         m = self.app.db.ledger_month(cur, self.year.year, month)
         if not m["count"]:
@@ -245,9 +245,9 @@ class LedgerFrame(tk.Frame):
         sign = C.CURRENCY_SIGN[cur]
         net = m["balance"]
         if net > 0:
-            return f"+{sign}{C.fmt_money(net, cur)}", theme.CARD, theme.SUCCESS
+            return f"+{sign}{C.fmt_money(net, cur)}", theme.SUCCESS_SOFT, theme.SUCCESS
         if net < 0:
-            return f"-{sign}{C.fmt_money(-net, cur)}", theme.CARD, theme.ERROR
+            return f"-{sign}{C.fmt_money(-net, cur)}", theme.ERROR_SOFT, theme.ERROR
         return f"{sign}0.00", theme.CARD, theme.MUTED
 
     def _year_note(self, year: int) -> str:

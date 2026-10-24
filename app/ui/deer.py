@@ -140,13 +140,13 @@ class DeerFrame(tk.Frame):
         return C.DEER_LABEL[lv], C.DEER_COLOR[lv], C.DEER_TEXT_COLOR[lv], str(lv)
 
     def _year_value(self, month: int):
-        """年视图: 每个月一个数值 = 当月鹿次数之和."""
+        """年视图: 每个月一个数值 = 当月鹿次数之和, 底色取当月最重的一天."""
         levels = self.app.db.deer_month(self.year.year, month)
         total = sum(levels.values())
         if not total:
             return "—", theme.CARD, theme.MUTED
-        # 颜色跟着"当月最重的一天"走, 一眼看出哪个月厉害
-        return str(total), theme.CARD, C.DEER_COLOR[max(levels.values())]
+        lv = max(levels.values())
+        return str(total), C.DEER_COLOR[lv], C.DEER_TEXT_COLOR[lv]
 
     def _year_note(self, year: int) -> str:
         total = sum(

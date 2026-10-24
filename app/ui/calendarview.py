@@ -18,9 +18,11 @@ from .widgets import FlatButton
 
 WEEK = ("一", "二", "三", "四", "五", "六", "日")
 
-CELL_W = 66         # 日期格子固定宽
-CELL_H = 71         # 日期格子固定高 (含边框与间距)
-NAV_W = 3           # 翻月/翻年按钮统一宽度(字符数), 保证 ‹ 与 › 一样大
+CELL = 70           # 日期格子边长: 宽高一致 = 正方形
+CELL_W = CELL       # 兼容旧名
+CELL_H = CELL
+CELL_GAP = 3        # 格子之间的间距 (四周各留一半)
+NAV = 34            # 翻月/翻年按钮边长 (正方形)
 
 
 class MonthCalendar(tk.Frame):
@@ -45,19 +47,31 @@ class MonthCalendar(tk.Frame):
         self._build()
 
     # ------------------------------------------------------------ 构建
+    def _nav(self, parent, text: str, cmd, col: int) -> FlatButton:
+        """正方形翻月按钮.
+
+        以前给的是 width=30 —— 那是**像素**不是字符, 两个按钮各要 300px,
+        控件总宽才 490px, 于是右边的 › 被挤出可视区, 只剩一条缝 (像坏了)。
+        """
+        b = FlatButton(parent, text, cmd, bg=theme.CARD, font=theme.f(16, "bold"),
+                       padx=0, pady=0)
+        b.configure(width=NAV, height=NAV)
+        b.pack_propagate(False)
+        b.grid_propagate(False)
+        b.grid(row=0, column=col)
+        return b
+
     def _build(self) -> None:
         head = tk.Frame(self, bg=theme.BG)
         head.pack(fill="x", pady=(0, 8))
         # 固定列宽: 标题列吃掉多余空间, 按钮列各自固定 —— 换月时不会左右抖
         head.grid_columnconfigure(1, weight=1)
 
-        FlatButton(head, "‹", self.prev_month, bg=theme.CARD, font=theme.f(13, "bold"),
-                   padx=0, pady=3, width=NAV_W * 10).grid(row=0, column=0)
+        self._nav(head, "‹", self.prev_month, 0)
         self.title = tk.Label(head, text="", bg=theme.BG, fg=theme.TEXT,
                               font=theme.f(14, "bold"))
         self.title.grid(row=0, column=1, padx=14, sticky="w")
-        FlatButton(head, "›", self.next_month, bg=theme.CARD, font=theme.f(13, "bold"),
-                   padx=0, pady=3, width=NAV_W * 10).grid(row=0, column=2)
+        self._nav(head, "›", self.next_month, 2)
 
         # 汇总行单独占一行, 并限制换行宽度 —— 文字长短不能反过来把日历撑宽,
         # 否则换个月份日历整体宽度就会跟着文字跳
@@ -92,14 +106,16 @@ class MonthCalendar(tk.Frame):
 
         for r in range(6):
             for c in range(7):
-                cell = tk.Frame(self.grid_wrap, bg=theme.CARD, width=CELL_W,
-                                height=CELL_H - 4,
+                cell = tk.Frame(self.grid_wrap, bg=theme.CARD,
+                                width=CELL - CELL_GAP * 2,
+                                height=CELL - CELL_GAP * 2,
                                 highlightthickness=1, highlightbackground=theme.BORDER)
-                cell.grid(row=r, column=c, sticky="nsew", padx=2, pady=2)
+                cell.grid(row=r, column=c, sticky="nsew",
+                          padx=CELL_GAP, pady=CELL_GAP)
                 cell.grid_propagate(False)
                 day = tk.Label(cell, text="", bg=theme.CARD, fg=theme.TEXT,
-                               font=theme.f(10, "bold"), anchor="nw")
-                day.pack(anchor="nw", padx=6, pady=(4, 0))
+                               font=theme.f(11, "bold"), anchor="nw")
+                day.pack(anchor="nw", padx=6, pady=(5, 0))
                 info = tk.Label(cell, text="", bg=theme.CARD, fg=theme.MUTED,
                                 font=theme.f(9), anchor="center", justify="center")
                 info.pack(expand=True, fill="both", padx=3)
@@ -203,18 +219,25 @@ class YearSummary(tk.Frame):
         self._boxes: list[tuple[int, tk.Frame, tk.Label, tk.Label]] = []
         self._build()
 
+    def _nav(self, parent, text: str, cmd, col: int) -> FlatButton:
+        b = FlatButton(parent, text, cmd, bg=theme.CARD, font=theme.f(16, "bold"),
+                       padx=0, pady=0)
+        b.configure(width=NAV, height=NAV)
+        b.pack_propagate(False)
+        b.grid_propagate(False)
+        b.grid(row=0, column=col)
+        return b
+
     def _build(self) -> None:
         head = tk.Frame(self, bg=theme.BG)
         head.pack(fill="x", pady=(0, 8))
         head.grid_columnconfigure(1, weight=1)
-        FlatButton(head, "‹", self.prev_year, bg=theme.CARD, font=theme.f(13, "bold"),
-                   padx=0, pady=3, width=NAV_W * 10).grid(row=0, column=0)
+        self._nav(head, "‹", self.prev_year, 0)
         # 年份与全年合计合成一行, 免得汇总单独成行后被挤成好几段
         self.title = tk.Label(head, text="", bg=theme.BG, fg=theme.TEXT,
                               font=theme.f(11), anchor="w")
         self.title.grid(row=0, column=1, padx=14, sticky="w")
-        FlatButton(head, "›", self.next_year, bg=theme.CARD, font=theme.f(13, "bold"),
-                   padx=0, pady=3, width=NAV_W * 10).grid(row=0, column=2)
+        self._nav(head, "›", self.next_year, 2)
 
         if self.on_back:
             FlatButton(self, "月视图", self.on_back, bg=theme.CARD, font=theme.f(10),
@@ -228,25 +251,25 @@ class YearSummary(tk.Frame):
         for r in range(4):
             grid.grid_rowconfigure(r, weight=1, uniform="yrow", minsize=72)
 
-        for m in range(1, 13):
+        for month in range(1, 13):
             box = tk.Frame(grid, bg=theme.CARD, highlightthickness=1,
                            highlightbackground=theme.BORDER)
-            box.grid(row=(m - 1) // 3, column=(m - 1) % 3,
+            box.grid(row=(month - 1) // 3, column=(month - 1) % 3,
                      sticky="nsew", padx=5, pady=5)
             label = tk.Label(box, text="", bg=theme.CARD, fg=theme.MUTED,
-                             font=theme.f(10), anchor="w")
+                             font=theme.f(11, "bold"), anchor="w")
             label.pack(fill="x", padx=10, pady=(8, 0))
             value = tk.Label(box, text="", bg=theme.CARD, fg=theme.TEXT,
-                             font=theme.f(15, "bold"), anchor="w")
+                             font=theme.f(16, "bold"), anchor="w")
             value.pack(fill="x", padx=10, pady=(0, 8))
             if self.on_pick_month:
                 for w in (box, label, value):
-                    w.bind("<Button-1>", lambda e, mm=m: self.on_pick_month(mm))
+                    w.bind("<Button-1>", lambda e, mm=month: self.on_pick_month(mm))
                     try:
                         w.configure(cursor="hand2")
                     except tk.TclError:
                         pass
-            self._boxes.append((m, box, label, value))
+            self._boxes.append((month, box, label, value))
 
     def refresh(self) -> None:
         line = f"{self.year} 年"
@@ -255,10 +278,13 @@ class YearSummary(tk.Frame):
             if extra:
                 line += "　·　" + extra
         self.title.configure(text=line)
-        for m, _box, label, value in self._boxes:
-            text, _bg, fg = self.value_fn(m)
-            label.configure(text=self.title_of(m))
-            value.configure(text=text, fg=fg)
+        for month, box, label, value in self._boxes:
+            text, bg, fg = self.value_fn(month)
+            # 底色也要跟着数据走: 只看数字看不出哪个月最厉害
+            box.configure(bg=bg, highlightbackground=bg if bg != theme.CARD else theme.BORDER)
+            label.configure(text=self.title_of(month), bg=bg,
+                            fg=fg if bg != theme.CARD else theme.MUTED)
+            value.configure(text=text, bg=bg, fg=fg)
 
     def prev_year(self) -> None:
         self.year -= 1

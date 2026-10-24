@@ -123,12 +123,13 @@ def main() -> int:
                 rec = by_id.get(it["id"])
                 fix = str(rec.get("fix") or "").strip() if rec else ""
 
-                # 1) 题干错字 (固定表 + 报告里"像是在改题干"的)
+                # 1) 题干错字: 只认手工核对过的 PROMPT_FIX 表。
+                #    这里曾经按"报告给的 fix 看起来像在改题干"自动替换, 结果把
+                #    日语题干换成了中文译文 (吉田さんは…→吉田是大学的教授吗？)、
+                #    把假名题干换成了汉字答案 (ちいさい→小さい) —— 语义很像,
+                #    语言却错了。所以自动替换一律不做。
                 p = it["prompt"]
                 np_ = apply_prompt_fix(p)
-                if fix and fix != p and not isinstance(it.get("answer"), int) \
-                        and same_ish(fix, p):
-                    np_ = fix
                 if np_ != p:
                     it["prompt"] = np_
                     changed_prompt += 1

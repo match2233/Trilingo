@@ -20,7 +20,7 @@ WEEK = ("一", "二", "三", "四", "五", "六", "日")
 
 CELL = 70           # 日期格子默认边长 (窗口变大时会按可用空间放大)
 CELL_MIN = 44       # 再小就放不下日期与数字了
-CELL_MAX = 88       # 再大就过于夸张, 而且 6 行会撑出页面
+CELL_MAX = 104      # 再大就过于夸张 (格子太大反而显得空)
 CELL_GAP = 3        # 格子之间的间距 (四周各留一半)
 NAV = 34            # 翻月/翻年按钮边长 (正方形)
 CHROME_H = 104      # 表头 + 汇总 + 星期行占用的高度, 算可用高度时要扣掉
@@ -64,8 +64,14 @@ class MonthCalendar(tk.Frame):
         return b
 
     def _build(self) -> None:
+        # 所有内容装进 body, 由 _on_resize 把它按 "7 个格子宽" 摆到正中 ——
+        # 直接铺满整页的话, 大窗口下右边会留一大片空白, 日历也偏在左边
+        self.body = tk.Frame(self, bg=theme.BG, width=CELL * 7)
+        self.body.pack(expand=True, anchor="center")
+        self.body.pack_propagate(False)
+
         # 表头宽度锁到 7 个格子: 否则窗口一宽, ‹ › 会被推到离日历很远的两端
-        head = tk.Frame(self, bg=theme.BG, height=NAV + 10)
+        head = tk.Frame(self.body, bg=theme.BG, height=NAV + 10)
         head.pack(anchor="w", pady=(0, 8))
         head.grid_propagate(False)
         head.grid_columnconfigure(1, weight=1)
@@ -83,12 +89,12 @@ class MonthCalendar(tk.Frame):
 
         # 汇总行单独占一行, 并限制换行宽度 —— 文字长短不能反过来把日历撑宽,
         # 否则换个月份日历整体宽度就会跟着文字跳
-        self.summary = tk.Label(self, text="", bg=theme.BG, fg=theme.MUTED,
+        self.summary = tk.Label(self.body, text="", bg=theme.BG, fg=theme.MUTED,
                                font=theme.f(10), anchor="w", justify="left",
                                wraplength=CELL * 7)
         self.summary.pack(anchor="w", pady=(0, 8))
 
-        wk = tk.Frame(self, bg=theme.BG)
+        wk = tk.Frame(self.body, bg=theme.BG)
         wk.pack(fill="x")
         self._wk = wk
         for i, w in enumerate(WEEK):
@@ -96,7 +102,7 @@ class MonthCalendar(tk.Frame):
             tk.Label(wk, text=w, bg=theme.BG, fg=fg, font=theme.f(9)).grid(
                 row=0, column=i, sticky="ew", pady=(0, 4))
 
-        self.grid_wrap = tk.Frame(self, bg=theme.BG)
+        self.grid_wrap = tk.Frame(self.body, bg=theme.BG)
         self.grid_wrap.pack(fill="x")
         # 高度由 _on_resize 按边长写死: 否则格子里的文字会把行撑高,
         # 行高 > 列宽, 格子又变成长方形
@@ -105,9 +111,6 @@ class MonthCalendar(tk.Frame):
             self.grid_wrap.grid_columnconfigure(i, minsize=CELL, weight=0)
         for r in range(6):
             self.grid_wrap.grid_rowconfigure(r, minsize=CELL, weight=0)
-        # 余下的竖向空间留白, 这样日历总高恒定
-        self.spacer = tk.Frame(self, bg=theme.BG)
-        self.spacer.pack(fill="both", expand=True)
 
         for r in range(6):
             for c in range(7):
@@ -162,6 +165,8 @@ class MonthCalendar(tk.Frame):
         self._head.configure(width=side * 7)
         self._wk.configure(width=side * 7)
         self.summary.configure(wraplength=side * 7)
+        # body 关掉了尺寸传播, 高度得自己算: 表头 + 汇总 + 星期行 + 6 行格子
+        self.body.configure(width=side * 7, height=CHROME_H + side * 6)
         # 格子窄的时候第二行文字会折成好几行, 反而把行高撑大(格子又变长方形),
         # 所以小尺寸下只显示日期
         show_info = side >= 68

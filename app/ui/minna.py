@@ -65,7 +65,7 @@ class MinnaListFrame(tk.Frame):
         btn = FlatButton(card, "", lambda n=num: self._enter(n),
                          bg=theme.CARD, hover=theme.PRIMARY_SOFT,
                          active_bg=theme.PRIMARY_SOFT, font=theme.f(11),
-                         padx=0, pady=0)
+                         padx=0, pady=0, border=theme.CARD)
         btn.pack(fill="x")
         btn.configure(highlightbackground=theme.CARD)
         btn._label.pack_forget()          # 用自绘的一行替掉默认文字

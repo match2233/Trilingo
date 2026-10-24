@@ -288,6 +288,8 @@ class MenuFrame(tk.Frame):
         btn = FlatButton(
             card, title, cmd, bg=theme.CARD, hover=soft, active_bg=soft,
             font=theme.f(21, "bold"), fg=color, pady=12,
+            # 外圈 Card 已经有描边了, 里面的按钮再描一圈会显出个"文本框"
+            border=theme.CARD,
         )
         btn.pack(fill="both", expand=True, padx=2, pady=2)
         btn.set_subtitle(sub)

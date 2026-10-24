@@ -61,7 +61,8 @@ class LifeFrame(tk.Frame):
         mark.pack(expand=True)
         btn = FlatButton(box, title, lambda k=key: self.app.show(k),
                          bg=theme.CARD, hover=soft, active_bg=soft,
-                         font=theme.f(23, "bold"), fg=color, pady=8)
+                         font=theme.f(23, "bold"), fg=color, pady=8,
+                         border=theme.CARD)
         btn.pack(fill="x", padx=2)
         btn.set_subtitle(sub)
         btn.configure(highlightbackground=theme.CARD)

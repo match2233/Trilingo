@@ -18,11 +18,12 @@ from .widgets import FlatButton
 
 WEEK = ("一", "二", "三", "四", "五", "六", "日")
 
-CELL = 70           # 日期格子边长: 宽高一致 = 正方形
-CELL_W = CELL       # 兼容旧名
-CELL_H = CELL
+CELL = 70           # 日期格子默认边长 (窗口变大时会按可用空间放大)
+CELL_MIN = 44       # 再小就放不下日期与数字了
+CELL_MAX = 88       # 再大就过于夸张, 而且 6 行会撑出页面
 CELL_GAP = 3        # 格子之间的间距 (四周各留一半)
 NAV = 34            # 翻月/翻年按钮边长 (正方形)
+CHROME_H = 104      # 表头 + 汇总 + 星期行占用的高度, 算可用高度时要扣掉
 
 
 class MonthCalendar(tk.Frame):
@@ -36,15 +37,16 @@ class MonthCalendar(tk.Frame):
         self.on_pick = on_pick          # 不传 = 格子不可选(纯展示)
         self.on_year = on_year          # 不传 = 不显示"年视图"按钮
 
-        # 宽度写死: 否则某个月的汇总文字更长时, 会把整个控件(以及日历格子)
-        # 一起撑宽 —— 一翻月页面就在左右跳
-        self.configure(width=CELL_W * 7)
-        self.pack_propagate(False)
+        # 不写死宽度: 格子边长按"当前可用宽度 / 7"实时算, 保证永远是正方形。
+        # (写死的话窗口一拉宽, 列被撑开而行高不变, 格子就变成扁长方形)
+        self.side = CELL
+        self._last_side = 0
 
         today = dt.date.today()
         self.year, self.month = today.year, today.month
         self._cells: list[tk.Frame] = []
         self._build()
+        self.bind("<Configure>", self._on_resize)
 
     # ------------------------------------------------------------ 构建
     def _nav(self, parent, text: str, cmd, col: int) -> FlatButton:
@@ -62,44 +64,47 @@ class MonthCalendar(tk.Frame):
         return b
 
     def _build(self) -> None:
-        head = tk.Frame(self, bg=theme.BG)
-        head.pack(fill="x", pady=(0, 8))
-        # 固定列宽: 标题列吃掉多余空间, 按钮列各自固定 —— 换月时不会左右抖
+        # 表头宽度锁到 7 个格子: 否则窗口一宽, ‹ › 会被推到离日历很远的两端
+        head = tk.Frame(self, bg=theme.BG, height=NAV + 10)
+        head.pack(anchor="w", pady=(0, 8))
+        head.grid_propagate(False)
         head.grid_columnconfigure(1, weight=1)
+        self._head = head
 
         self._nav(head, "‹", self.prev_month, 0)
         self.title = tk.Label(head, text="", bg=theme.BG, fg=theme.TEXT,
                               font=theme.f(14, "bold"))
         self.title.grid(row=0, column=1, padx=14, sticky="w")
-        self._nav(head, "›", self.next_month, 2)
+        if self.on_year:
+            FlatButton(head, "年视图", lambda: self.on_year(self.year),
+                       bg=theme.CARD, font=theme.f(10), padx=12, pady=4).grid(
+                row=0, column=2, padx=(0, 8))
+        self._nav(head, "›", self.next_month, 3)
 
         # 汇总行单独占一行, 并限制换行宽度 —— 文字长短不能反过来把日历撑宽,
         # 否则换个月份日历整体宽度就会跟着文字跳
         self.summary = tk.Label(self, text="", bg=theme.BG, fg=theme.MUTED,
                                font=theme.f(10), anchor="w", justify="left",
-                               wraplength=CELL_W * 7)
-        self.summary.pack(fill="x", pady=(0, 6))
-        if self.on_year:
-            FlatButton(self, "年视图", lambda: self.on_year(self.year),
-                       bg=theme.CARD, font=theme.f(10), padx=12, pady=4).pack(
-                anchor="e", pady=(0, 6))
+                               wraplength=CELL * 7)
+        self.summary.pack(anchor="w", pady=(0, 8))
 
         wk = tk.Frame(self, bg=theme.BG)
         wk.pack(fill="x")
+        self._wk = wk
         for i, w in enumerate(WEEK):
-            wk.grid_columnconfigure(i, weight=1, uniform="cal")
             fg = theme.ERROR if i >= 5 else theme.MUTED
             tk.Label(wk, text=w, bg=theme.BG, fg=fg, font=theme.f(9)).grid(
                 row=0, column=i, sticky="ew", pady=(0, 4))
 
-        self.grid_wrap = tk.Frame(self, bg=theme.BG, width=CELL_W * 7,
-                                  height=CELL_H * 6)
+        self.grid_wrap = tk.Frame(self, bg=theme.BG)
         self.grid_wrap.pack(fill="x")
-        self.grid_wrap.pack_propagate(False)     # 宽高都写死, 不受内容影响
+        # 高度由 _on_resize 按边长写死: 否则格子里的文字会把行撑高,
+        # 行高 > 列宽, 格子又变成长方形
+        self.grid_wrap.grid_propagate(False)
         for i in range(7):
-            self.grid_wrap.grid_columnconfigure(i, weight=1, uniform="cal")
+            self.grid_wrap.grid_columnconfigure(i, minsize=CELL, weight=0)
         for r in range(6):
-            self.grid_wrap.grid_rowconfigure(r, minsize=CELL_H)   # 不设 weight
+            self.grid_wrap.grid_rowconfigure(r, minsize=CELL, weight=0)
         # 余下的竖向空间留白, 这样日历总高恒定
         self.spacer = tk.Frame(self, bg=theme.BG)
         self.spacer.pack(fill="both", expand=True)
@@ -128,6 +133,46 @@ class MonthCalendar(tk.Frame):
                         w.bind("<Enter>", lambda e, cc=cell: self._hover(cc, True))
                         w.bind("<Leave>", lambda e, cc=cell: self._hover(cc, False))
                 self._cells.append(cell)
+
+    # ------------------------------------------------------------ 尺寸
+    def _on_resize(self, event=None) -> None:
+        """窗口变化时重算格子边长, 始终保持正方形。
+
+        列宽会随窗口变, 行高必须跟着走 —— 否则格子被拉成扁长方形。
+        边长同时受宽和高约束 (6 行不能超出可视高度), 并夹在上下限之间。
+        """
+        width = (event.width if event is not None else self.winfo_width())
+        height = (event.height if event is not None else self.winfo_height())
+        if width < 50:
+            return
+        by_w = (width - CELL_GAP * 2 * 7) // 7
+        by_h = (height - CHROME_H) // 6 if height > CHROME_H + 60 else CELL_MAX
+        side = max(CELL_MIN, min(CELL_MAX, by_w, by_h))
+        if side == self._last_side:
+            return
+        self._last_side = side
+        self.side = side
+        inner = max(20, side - CELL_GAP * 2)
+        for i in range(7):
+            self.grid_wrap.grid_columnconfigure(i, minsize=side, weight=0)
+            self._wk.grid_columnconfigure(i, minsize=side, weight=0)
+        for r in range(6):
+            self.grid_wrap.grid_rowconfigure(r, minsize=side, weight=0)
+        self.grid_wrap.configure(height=side * 6)
+        self._head.configure(width=side * 7)
+        self._wk.configure(width=side * 7)
+        self.summary.configure(wraplength=side * 7)
+        # 格子窄的时候第二行文字会折成好几行, 反而把行高撑大(格子又变长方形),
+        # 所以小尺寸下只显示日期
+        show_info = side >= 68
+        for cell in self._cells:
+            cell.configure(width=inner, height=inner)
+            info = cell._info          # type: ignore[attr-defined]
+            if show_info:
+                if not info.winfo_ismapped():
+                    info.pack(expand=True, fill="both", padx=3)
+            else:
+                info.pack_forget()
 
     # ------------------------------------------------------------ 绘制
     def refresh(self) -> None:

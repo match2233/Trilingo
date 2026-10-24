@@ -620,6 +620,16 @@ init();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    // 新版 Service Worker 接管后自动刷新一次 —— 否则手机上会一直用旧缓存,
+    // 改好的样式看不到 (改完版本号还要等用户手动关掉重开才生效)
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController) return;              // 首次安装不算更新
+      const cur = document.querySelector('.view.active');
+      const busy = cur && (cur.id === 'minnaTest' || cur.id === 'quiz');
+      if (busy) return;                        // 正在做题, 别打断
+      window.location.reload();
+    });
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   });
 }

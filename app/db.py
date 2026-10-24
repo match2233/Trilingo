@@ -165,6 +165,16 @@ CREATE TABLE IF NOT EXISTS minna_result (
     ok      INTEGER NOT NULL,
     PRIMARY KEY (lesson, qid)
 );
+
+-- 收藏的题目 + 自己的笔记 (与题库内容分开存, 题库重新生成也不会冲掉笔记)
+CREATE TABLE IF NOT EXISTS minna_fav (
+    lesson     INTEGER NOT NULL,
+    qid        TEXT NOT NULL,
+    note       TEXT NOT NULL DEFAULT '',
+    created_at TEXT,
+    updated_at TEXT,
+    PRIMARY KEY (lesson, qid)
+);
 """
 
 
@@ -1211,9 +1221,58 @@ class Database:
         }
 
     def minna_reset(self, lesson: int) -> None:
-        """重做这一课: 清空进度与结果."""
+        """重做这一课: 清空进度与结果 (收藏与笔记保留)."""
         self.conn.execute("DELETE FROM minna_result WHERE lesson=?", (lesson,))
         self.conn.execute("DELETE FROM minna_progress WHERE lesson=?", (lesson,))
+        self.conn.commit()
+
+    # ------------------------------------------------------------ 收藏
+    def minna_fav_ids(self) -> set[tuple[int, str]]:
+        return {(int(r["lesson"]), r["qid"]) for r in self.conn.execute(
+            "SELECT lesson, qid FROM minna_fav")}
+
+    def minna_fav_all(self) -> list[dict]:
+        """收藏夹: 按课、题号排序; 带上笔记."""
+        return [dict(r) for r in self.conn.execute(
+            "SELECT lesson, qid, note, created_at, updated_at FROM minna_fav"
+            " ORDER BY lesson, qid")]
+
+    def minna_fav_get(self, lesson: int, qid: str) -> dict | None:
+        r = self.conn.execute(
+            "SELECT lesson, qid, note FROM minna_fav WHERE lesson=? AND qid=?",
+            (lesson, qid)).fetchone()
+        return dict(r) if r else None
+
+    def minna_fav_toggle(self, lesson: int, qid: str) -> bool:
+        """收藏/取消收藏, 返回操作后是否处于收藏状态."""
+        cur = self.conn.execute(
+            "SELECT 1 FROM minna_fav WHERE lesson=? AND qid=?", (lesson, qid)
+        ).fetchone()
+        if cur:
+            self.conn.execute(
+                "DELETE FROM minna_fav WHERE lesson=? AND qid=?", (lesson, qid))
+            self.conn.commit()
+            return False
+        now = _now()
+        self.conn.execute(
+            "INSERT INTO minna_fav (lesson, qid, note, created_at, updated_at)"
+            " VALUES (?,?,?,?,?)", (lesson, qid, "", now, now))
+        self.conn.commit()
+        return True
+
+    def minna_fav_note(self, lesson: int, qid: str, note: str) -> None:
+        now = _now()
+        self.conn.execute(
+            "INSERT INTO minna_fav (lesson, qid, note, created_at, updated_at)"
+            " VALUES (?,?,?,?,?)"
+            " ON CONFLICT(lesson, qid) DO UPDATE SET note=excluded.note,"
+            " updated_at=excluded.updated_at",
+            (lesson, qid, note, now, now))
+        self.conn.commit()
+
+    def minna_fav_remove(self, lesson: int, qid: str) -> None:
+        self.conn.execute(
+            "DELETE FROM minna_fav WHERE lesson=? AND qid=?", (lesson, qid))
         self.conn.commit()
 
     # ------------------------------------------------------------ 同步用 (生活记录 / 测试)

@@ -91,6 +91,10 @@ class TrilingoApp(tk.Tk):
             from .minna_test import MinnaTestFrame
 
             return MinnaTestFrame(self.container, self)
+        if name == "minna_fav":
+            from .minna_fav import MinnaFavFrame
+
+            return MinnaFavFrame(self.container, self)
         if name == "sentence":
             from .sentence import SentenceFrame
 

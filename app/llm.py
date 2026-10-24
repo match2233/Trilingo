@@ -190,3 +190,60 @@ def test_connection() -> tuple[bool, str]:
     if got.get("猫"):
         return True, f"连接成功，模型 {cfg['model']} 返回：猫 → {got['猫']}"
     return False, "调用失败。请检查 API key、网络，或 base_url / 模型名是否正确。"
+
+
+# ------------------------------------------------------------------ 翻译判分
+JUDGE_PROMPT = """你是日语教师，正在批改《新版中日交流标准日本语（初级上）》的翻译题。
+
+判断学生的译文是否正确。判定规则：
+1. **意思等同、语法正确、表达自然 → correct**。不要因为和参考译文措辞不同就判错。
+2. 允许：近义表达、语序调整、敬体/简体的合理选择、省略与补充同类信息。
+3. 判 wrong 的情况：关键意思遗漏或译反、语法错误、用词明显不当、只写了个别词。
+4. 学生译文如果是罗马字、拼音、或几乎照抄原句（中译日题抄中文），一律 wrong。
+
+只输出 JSON：{"verdict":"correct" 或 "wrong","reason":"不超过 30 字的中文说明"}"""
+
+
+def judge_translation(prompt: str, user_answer: str, reference: str,
+                      to_japanese: bool = False) -> tuple[bool | None, str]:
+    """判一道翻译题. 返回 (对错, 说明); 调用失败返回 (None, 错误说明)."""
+    cfg = load_config()
+    if not cfg["api_key"] or not cfg.get("enabled", True):
+        return None, "未配置 AI 判分"
+    direction = "把汉语译成日语" if to_japanese else "把日语译成汉语"
+    user = (f"题型：{direction}\n"
+            f"原题：{prompt}\n"
+            f"参考译文：{reference or '（无）'}\n"
+            f"学生译文：{user_answer}\n\n"
+            "请判定学生译文。")
+    url = cfg["base_url"].rstrip("/") + "/chat/completions"
+    payload = {
+        "model": cfg["model"],
+        "messages": [{"role": "system", "content": JUDGE_PROMPT},
+                     {"role": "user", "content": user}],
+        "response_format": {"type": "json_object"},
+        "temperature": 0,
+        "stream": False,
+    }
+    try:
+        data = _post(url, payload, cfg["api_key"], timeout=45)
+        content = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+        obj = _extract_json(content)
+        verdict = str(obj.get("verdict", "")).strip().lower()
+        reason = str(obj.get("reason", "")).strip()[:60]
+        if verdict == "correct":
+            return True, reason
+        if verdict == "wrong":
+            return False, reason
+        return None, "AI 返回内容无法解析"
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", "replace")[:120]
+        except Exception:
+            pass
+        log.warning("判分请求失败 HTTP %s: %s", exc.code, detail)
+        return None, f"AI 请求失败（HTTP {exc.code}）"
+    except Exception as exc:  # noqa: BLE001
+        log.warning("判分请求失败: %s: %s", type(exc).__name__, exc)
+        return None, f"AI 请求失败：{type(exc).__name__}"

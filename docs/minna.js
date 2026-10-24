@@ -1,4 +1,4 @@
-/* 新标日测试 (PWA 版) —— 与电脑端同一份题库、同一套交互逻辑。
+﻿/* 新标日测试 (PWA 版) —— 与电脑端同一份题库、同一套交互逻辑。
  *
  * 题库: minna_tests.json (由 tools/build_minna_tests.py 生成, 与桌面共用)
  * 进度: localStorage, 每台设备各记各的, 不参与同步
@@ -6,8 +6,10 @@
  * 三种题型:
  *   fill      整大题一次列出 -> 显示答案 -> 逐题标对错(默认对) -> 下一大题
  *   choice    一题一屏, 选项按钮; 对 -> 5 秒自动下一题, 错 -> 手动下一题
- *   translate 一题一屏 -> 显示答案 -> 对/错
+ *   translate 一题一屏 -> 自己写译文 -> AI 判分 (没配 AI 就显示答案自评)
  */
+
+import * as Llm from './llm.js';
 
 const CORRECT_WAIT = 5000;
 
@@ -438,32 +440,68 @@ function advanceChoice() {
 function renderTranslate(sec) {
   const idx = Math.min(M.itemI, sec.items.length - 1);
   const it = sec.items[idx];
+  const toJp = /日语/.test(sec.title);
   $('mtBody').innerHTML = `
     <div class="mt-card">
       <div class="sub">${sec.no}、${esc(sec.title)}　·　第 ${idx + 1} / ${sec.items.length} 小题</div>
       <div class="mt-prompt">${esc(it.prompt)}</div>
-      <div class="fill-ans" id="trAns" style="text-align:left;font-size:15px"></div>
-      <div class="mt-judge" style="margin-top:14px">
-        <button class="yes" id="trReveal">显示答案</button>
+      <div class="sub" style="margin:12px 0 6px">请写出${toJp ? '日语' : '汉语'}的译文：</div>
+      <textarea id="trInput" rows="3"></textarea>
+      <div class="mt-judge" style="margin-top:12px">
+        <button class="yes" id="trSubmit">提交</button>
+        <button class="no" id="trReveal" style="background:#fff;color:var(--text)">不会，看答案</button>
       </div>
+      <div class="fill-ans" id="trAns" style="text-align:left;font-size:15px;display:none"></div>
       <div id="trJudge"></div>
       <div id="trHint" class="sub"></div>
     </div>`;
+  const showRef = () => {
+    $('trAns').style.display = '';
+    $('trAns').textContent = `参考译文：${it.answer || '（未提供答案）'}`;
+  };
+  $('trSubmit').onclick = async () => {
+    const text = ($('trInput').value || '').trim();
+    if (!text) { $('trHint').textContent = '先写一句译文再提交，或点「不会，看答案」。'; return; }
+    if (!Llm.ready()) {
+      $('trHint').textContent = '没配置 AI，改为自己对照答案判分。';
+      trSelfJudge(it, showRef);
+      return;
+    }
+    $('trSubmit').disabled = true;
+    $('trHint').textContent = 'AI 正在判分…';
+    $('trHint').style.color = 'var(--muted)';
+    const r = await Llm.judge(it.prompt, text, it.answer || '', toJp);
+    showRef();
+    $('trJudge').innerHTML = '';
+    $('trSubmit').parentElement.style.display = 'none';
+    if (r.ok === null) {
+      $('trHint').textContent = `${r.reason}，请自己对照答案判断：`;
+      trSelfJudge(it, null);
+      return;
+    }
+    judgeTranslate(it, r.ok, r.reason);
+  };
   $('trReveal').onclick = () => {
-    $('trAns').textContent = it.answer || '（未提供答案）';
-    $('trReveal').parentElement.style.display = 'none';
-    $('trJudge').innerHTML =
-      '<div class="mt-judge"><button class="yes" id="trYes">对</button><button class="no" id="trNo">错</button></div>';
-    $('trYes').onclick = () => judgeTranslate(it, true);
-    $('trNo').onclick = () => judgeTranslate(it, false);
+    showRef();
+    $('trSubmit').parentElement.style.display = 'none';
+    $('trHint').textContent = '对照答案自评：';
+    trSelfJudge(it, null);
   };
   if (M.noAnswer) $('trHint').textContent = '本题原卷未附答案，按自己的译文自评。';
 }
 
-function judgeTranslate(it, ok) {
+function trSelfJudge(it, after) {
+  if (after) after();
+  $('trJudge').innerHTML =
+    '<div class="mt-judge"><button class="yes" id="trYes">对</button><button class="no" id="trNo">错</button></div>';
+  $('trYes').onclick = () => judgeTranslate(it, true, '');
+  $('trNo').onclick = () => judgeTranslate(it, false, '');
+}
+
+function judgeTranslate(it, ok, reason) {
   M.results[it.id] = ok;
   updateHead();
-  $('trHint').textContent = ok ? '✅ 记为答对' : '❌ 记为答错';
+  $('trHint').textContent = (ok ? '✅ 判为正确' : '❌ 判为错误') + (reason ? `　${reason}` : '');
   $('trHint').style.color = ok ? '#1f9d55' : '#d64545';
   setNext('下一题', advanceTranslate);
 }

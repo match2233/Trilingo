@@ -226,7 +226,14 @@ class ScrollFrame(tk.Frame):
     """带竖向滚动条的容器, 内容放进 self.body.
 
     窗口变小时靠它兜住长内容 (24 课列表、整张试卷), 不会把布局撑破。
+
+    滚轮用**一个**全局绑定 + 活动实例登记表来分发: 以前每个实例各自
+    bind_all, 页面切走后控件已销毁但绑定还在, 一滚轮就报
+    `bad window path name ".!frame.!minnatestframe.!frame3.!scrollframe"`。
     """
+
+    _live: list["ScrollFrame"] = []
+    _bound = False
 
     def __init__(self, master, bg=theme.BG, **kw):
         super().__init__(master, bg=bg, **kw)
@@ -239,8 +246,36 @@ class ScrollFrame(tk.Frame):
         self._win = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
         self.body.bind("<Configure>", self._on_inner)
         self.canvas.bind("<Configure>", self._on_canvas)
-        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-            self.canvas.bind_all(seq, self._on_wheel, add="+")
+
+        ScrollFrame._live.append(self)
+        if not ScrollFrame._bound:
+            ScrollFrame._bound = True
+            for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+                self.bind_all(seq, ScrollFrame._dispatch, add="+")
+        self.bind("<Destroy>", self._on_destroy, add="+")
+
+    def _on_destroy(self, event=None) -> None:
+        # 只有自己(而不是内部子控件)被销毁时才注销
+        if event is not None and event.widget is not self:
+            return
+        try:
+            ScrollFrame._live.remove(self)
+        except ValueError:
+            pass
+
+    @classmethod
+    def _dispatch(cls, event):
+        for frame in list(cls._live):
+            try:
+                if frame._handle_wheel(event):
+                    return "break"
+            except tk.TclError:
+                # 控件刚被销毁, 顺手清掉
+                try:
+                    cls._live.remove(frame)
+                except ValueError:
+                    pass
+        return None
 
     def _on_inner(self, _=None) -> None:
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
@@ -248,14 +283,14 @@ class ScrollFrame(tk.Frame):
     def _on_canvas(self, event) -> None:
         self.canvas.itemconfigure(self._win, width=event.width)
 
-    def _on_wheel(self, event) -> None:
-        """滚轮只在指针位于本控件上时生效, 免得抢别的页面的滚动."""
-        if not self.winfo_ismapped():
-            return
+    def _handle_wheel(self, event) -> bool:
+        """滚轮只在指针位于本控件上时生效. 返回是否已处理."""
+        if not self.winfo_exists() or not self.winfo_ismapped():
+            return False
         try:
             w = self.winfo_containing(event.x_root, event.y_root)
         except Exception:          # noqa: BLE001
-            return
+            return False
         inside = False
         while w is not None:
             if w is self:
@@ -263,7 +298,7 @@ class ScrollFrame(tk.Frame):
                 break
             w = getattr(w, "master", None)
         if not inside:
-            return
+            return False
         if getattr(event, "num", None) == 4:
             delta = -1
         elif getattr(event, "num", None) == 5:
@@ -271,6 +306,7 @@ class ScrollFrame(tk.Frame):
         else:
             delta = -1 if getattr(event, "delta", 0) > 0 else 1
         self.canvas.yview_scroll(delta * 3, "units")
+        return True
 
     def scroll_to_top(self) -> None:
         self.canvas.yview_moveto(0)

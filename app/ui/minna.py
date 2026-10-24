@@ -31,6 +31,9 @@ class MinnaListFrame(tk.Frame):
         self.summary = tk.Label(head, text="", bg=theme.BG, fg=theme.MUTED,
                                 font=theme.f(11))
         self.summary.pack(side="right")
+        self.fav_btn = FlatButton(head, "收藏夹", lambda: self.app.show("minna_fav"),
+                                  bg=theme.CARD, font=theme.f(11), padx=14, pady=6)
+        self.fav_btn.pack(side="right", padx=(0, 12))
 
         # 列标题: 与下面的行对齐
         cols = tk.Frame(self, bg=theme.BG)

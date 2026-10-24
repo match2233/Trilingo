@@ -11,10 +11,11 @@
 from __future__ import annotations
 
 import datetime as dt
+import threading
 import tkinter as tk
 from tkinter import messagebox
 
-from .. import minna
+from .. import llm, minna
 from . import theme
 from .widgets import Card, FlatButton, ScrollFrame
 
@@ -465,29 +466,136 @@ class MinnaTestFrame(tk.Frame):
                  font=theme.f(20, "bold"), wraplength=780, justify="left").pack(
             anchor="w", pady=(0, 14))
 
+        # 自己写译文 -> AI 判分 -> 给出参考答案
+        tip = "译成日语" if "日语" in sec["title"] else "译成汉语"
+        tk.Label(inner, text=f"请写出{tip}的译文：", bg=theme.CARD, fg=theme.MUTED,
+                 font=theme.f(11)).pack(anchor="w", pady=(0, 4))
+        self._tr_input = tk.Text(inner, height=3, wrap="word", font=theme.f(14),
+                                 bg=theme.SUNK, fg=theme.TEXT,
+                                 relief="flat", padx=10, pady=8,
+                                 highlightthickness=1,
+                                 highlightbackground=theme.BORDER_STRONG,
+                                 highlightcolor=theme.BLUE)
+        self._tr_input.pack(fill="x", pady=(0, 10))
+        self._tr_input.bind("<Control-Return>",
+                            lambda e: (self._submit_translate(), "break")[1])
+        self._tr_input.focus_set()
+
+        row = tk.Frame(inner, bg=theme.CARD)
+        row.pack(anchor="w")
+        self._tr_btn = FlatButton(row, "提交（Ctrl+Enter）", self._submit_translate,
+                                  bg=theme.BLUE, fg="#FFFFFF", hover=theme.BLUE_DARK,
+                                  active_bg=theme.BLUE_DARK, border=theme.BLUE,
+                                  font=theme.f(11, "bold"), padx=20, pady=8)
+        self._tr_btn.pack(side="left")
+        self._tr_skip = FlatButton(row, "不会，直接看答案", self._reveal_translate,
+                                   bg=theme.CARD, font=theme.f(11),
+                                   padx=16, pady=8)
+        self._tr_skip.pack(side="left", padx=(10, 0))
+
         self._tr_ans = tk.Label(inner, text="", bg=theme.SUNK, fg=theme.BLUE,
                                 font=theme.f(15, "bold"), wraplength=760,
                                 justify="left", anchor="w", padx=12, pady=8)
-        self._tr_ans.pack(fill="x", pady=(0, 10))
-        self._tr_btn = FlatButton(inner, "显示答案", self._reveal_translate,
-                                  bg=theme.BLUE, fg="#FFFFFF", hover=theme.BLUE_DARK,
-                                  active_bg=theme.BLUE_DARK, border=theme.BLUE,
-                                  font=theme.f(11, "bold"),
-                                  padx=20, pady=8)
-        self._tr_btn.pack(anchor="w")
         self._tr_judge = tk.Frame(inner, bg=theme.CARD)
         self._tr_judge.pack(anchor="w", pady=(10, 0))
         self._tr_hint = tk.Label(inner, text="", bg=theme.CARD, fg=theme.MUTED,
-                                 font=theme.f(12, "bold"))
+                                 font=theme.f(12, "bold"), wraplength=760,
+                                 justify="left", anchor="w")
         self._tr_hint.pack(anchor="w", pady=(8, 0))
+        self._tr_poll_id = None
+        self._tr_prompt_text = it["prompt"]
+        self._tr_ref = it.get("answer") or ""
+        self._tr_to_jp = "日语" in sec["title"]
         if not known:
             self._tr_hint.configure(text="本题原卷未附答案，按自己的译文自评。")
 
-    def _reveal_translate(self) -> None:
+    # ---------------------------------------------------------- 翻译: 判分
+    def _submit_translate(self) -> None:
+        if getattr(self, "_tr_busy", False) or self._mode != "test":
+            return
+        text = self._tr_input.get("1.0", "end").strip()
+        if not text:
+            self._tr_hint.configure(text="先写一句译文再提交，或点「直接看答案」。",
+                                    fg=theme.MUTED)
+            return
+        if not llm.is_configured():
+            self._tr_hint.configure(
+                text="没有配置 AI，改为自己对照答案判分。", fg=theme.MUTED)
+            self._reveal_translate()
+            return
+        self._tr_busy = True
+        self._tr_user = text
+        self._tr_btn.set_text("判分中…")
+        self._tr_btn.set_enabled(False)
+        self._tr_skip.set_enabled(False)
+        self._tr_hint.configure(text="AI 正在判分…", fg=theme.MUTED)
+        self._tr_input.configure(state="disabled")
+        prompt, ref, to_jp = self._tr_prompt_text, self._tr_ref, self._tr_to_jp
+        box: dict = {}
+
+        def work():
+            box["r"] = llm.judge_translation(prompt, text, ref, to_jp)
+
+        threading.Thread(target=work, daemon=True).start()
+        self._poll_judge(box, 0)
+
+    def _poll_judge(self, box: dict, waited: int) -> None:
+        if not self.winfo_exists() or self._mode != "test":
+            return
+        if "r" in box:
+            self._on_judged(*box["r"])
+            return
+        if waited > 40000:                     # 40 秒还没回来就放弃
+            self._on_judged(None, "AI 判分超时")
+            return
+        self._tr_poll_id = self.after(150, lambda: self._poll_judge(box, waited + 150))
+
+    def _on_judged(self, ok, reason: str) -> None:
+        self._tr_busy = False
         sec = self._current()
         it = sec["items"][min(self.item_i, len(sec["items"]) - 1)]
-        self._tr_ans.configure(text=it.get("answer") or "（未提供答案）")
         self._tr_btn.pack_forget()
+        self._tr_skip.pack_forget()
+        self._show_reference()
+        if ok is None:
+            # AI 不可用 -> 退回自评, 答案照常给出
+            self._tr_hint.configure(text=f"{reason}，请自己对照答案判断：",
+                                    fg=theme.MUTED)
+            for w in self._tr_judge.winfo_children():
+                w.destroy()
+            FlatButton(self._tr_judge, "对", lambda: self._judge(True),
+                       bg=theme.SUCCESS_SOFT, fg=theme.SUCCESS,
+                       hover=theme.SUCCESS_SOFT, active_bg=theme.SUCCESS_SOFT,
+                       border=theme.SUCCESS, font=theme.f(12, "bold"),
+                       padx=24, pady=8).pack(side="left")
+            FlatButton(self._tr_judge, "错", lambda: self._judge(False),
+                       bg=theme.ERROR_SOFT, fg=theme.ERROR, hover=theme.ERROR_SOFT,
+                       active_bg=theme.ERROR_SOFT, border=theme.ERROR,
+                       font=theme.f(12, "bold"), padx=24, pady=8).pack(
+                side="left", padx=10)
+            return
+        self._record(it["id"], ok)
+        mark = "✅ 判为正确" if ok else "❌ 判为错误"
+        self._tr_hint.configure(
+            text=f"{mark}　{reason}" if reason else mark,
+            fg=theme.SUCCESS if ok else theme.ERROR)
+        self._show_next_btn("下一题", self._advance_translate)
+        self._update_progress()
+
+    def _show_reference(self) -> None:
+        self._tr_ans.configure(text=f"参考译文：{self._tr_ref or '（未提供答案）'}")
+        if not self._tr_ans.winfo_ismapped():
+            self._tr_ans.pack(fill="x", pady=(6, 10), before=self._tr_judge)
+
+    def _reveal_translate(self) -> None:
+        """不会做: 直接给参考答案, 自己判对错 (算答错更合理, 但仍给选择)."""
+        sec = self._current()
+        it = sec["items"][min(self.item_i, len(sec["items"]) - 1)]
+        self._tr_ref = it.get("answer") or self._tr_ref
+        self._tr_btn.pack_forget()
+        self._tr_skip.pack_forget()
+        self._tr_input.configure(state="disabled")
+        self._show_reference()
         for w in self._tr_judge.winfo_children():
             w.destroy()
         FlatButton(self._tr_judge, "对", lambda: self._judge(True),
@@ -498,6 +606,7 @@ class MinnaTestFrame(tk.Frame):
                    bg=theme.ERROR_SOFT, fg=theme.ERROR, hover=theme.ERROR_SOFT,
                    active_bg=theme.ERROR_SOFT, border=theme.ERROR,
                    font=theme.f(12, "bold"), padx=24, pady=8).pack(side="left", padx=10)
+        self._tr_hint.configure(text="对照答案自评：", fg=theme.MUTED)
 
     def _judge(self, ok: bool) -> None:
         sec = self._current()
@@ -506,8 +615,17 @@ class MinnaTestFrame(tk.Frame):
         self._tr_hint.configure(text="✅ 记为答对" if ok else "❌ 记为答错",
                                 fg=theme.SUCCESS if ok else theme.ERROR)
         self._show_next_btn("下一题", self._advance_translate)
+        self._update_progress()
 
     def _advance_translate(self) -> None:
+        self._clear_after()
+        if getattr(self, "_tr_poll_id", None):
+            try:
+                self.after_cancel(self._tr_poll_id)
+            except Exception:       # noqa: BLE001
+                pass
+            self._tr_poll_id = None
+        self._tr_busy = False
         sec = self._current()
         self.item_i += 1
         if self.item_i >= len(sec["items"]):
@@ -568,6 +686,29 @@ class MinnaTestFrame(tk.Frame):
         self.app.db.minna_save_cursor(self.lesson_no, self.sec_i, self.item_i,
                                       self.elapsed(), len([1 for v in self.results.values() if v]))
 
+    # ---------------------------------------------------------- 收藏
+    def _star(self, parent, it: dict, compact: bool = False) -> tk.Label:
+        """题目右侧/左侧的 ☆ 按钮: 点一下收藏, 再点取消."""
+        on = (self.lesson_no, it["id"]) in getattr(self, "_favs", set())
+        lab = tk.Label(parent, text="★" if on else "☆", bg=theme.SUNK,
+                       fg=theme.PRIMARY if on else theme.MUTED,
+                       font=theme.f(13 if compact else 15, "bold"),
+                       cursor="hand2")
+        lab.bind("<Button-1>", lambda e, q=it["id"]: self._toggle_fav(q, lab))
+        return lab
+
+    def _toggle_fav(self, qid: str, lab: tk.Label) -> None:
+        on = self.app.db.minna_fav_toggle(self.lesson_no, qid)
+        if on:
+            self._favs.add((self.lesson_no, qid))
+        else:
+            self._favs.discard((self.lesson_no, qid))
+        lab.configure(text="★" if on else "☆",
+                      fg=theme.PRIMARY if on else theme.MUTED)
+        self.foot_left.configure(
+            text=f"已收藏 {len(self._favs)} 题，可在「收藏夹」里写笔记" if on
+            else "已取消收藏")
+
     # ---------------------------------------------------------- 交卷
     def _finish(self) -> None:
         self._clear_after()
@@ -603,6 +744,7 @@ class MinnaTestFrame(tk.Frame):
         sc = ScrollFrame(self.body)
         sc.pack(fill="both", expand=True)
         width = max(self.body.winfo_width(), 600)
+        self._favs = self.app.db.minna_fav_ids()
 
         for sec in self.sections:
             box = Card(sc.body)
@@ -630,6 +772,7 @@ class MinnaTestFrame(tk.Frame):
                               padx=2, pady=2)
                     inner = tk.Frame(cell, bg=theme.SUNK)
                     inner.pack(fill="x", padx=8, pady=5)
+                    self._star(inner, it, compact=True).pack(side="left", padx=(0, 4))
                     tk.Label(inner, text=f"{i + 1}.", bg=theme.SUNK,
                              fg=theme.MUTED, font=theme.f(10)).pack(side="left")
                     tk.Label(inner, text=it["prompt"], bg=theme.SUNK,
@@ -645,6 +788,7 @@ class MinnaTestFrame(tk.Frame):
                     bad = ok is False
                     line = tk.Frame(body, bg=theme.SUNK)
                     line.pack(fill="x", pady=1)
+                    self._star(line, it).pack(side="left", padx=(0, 4))
                     tk.Label(line, text=f"{i + 1}.", bg=theme.SUNK, fg=theme.MUTED,
                              font=theme.f(10), width=3, anchor="ne").pack(side="left")
                     txt = it["prompt"]
@@ -683,6 +827,9 @@ class MinnaTestFrame(tk.Frame):
                 w.pack_forget()
         FlatButton(self.foot, "返回列表", lambda: self.app.show("minna"),
                    bg=theme.CARD, font=theme.f(11), padx=18, pady=8).pack(side="right")
+        FlatButton(self.foot, "收藏夹", lambda: self.app.show("minna_fav"),
+                   bg=theme.CARD, font=theme.f(11), padx=18, pady=8).pack(
+            side="right", padx=(0, 8))
         FlatButton(self.foot, "重做这一课", self._redo,
                    bg=theme.CARD, font=theme.f(11), padx=18, pady=8).pack(
             side="right", padx=(0, 8))

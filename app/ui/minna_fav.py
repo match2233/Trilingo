@@ -101,6 +101,8 @@ class MinnaFavFrame(tk.Frame):
     def __init__(self, master, app):
         super().__init__(master, bg=theme.BG)
         self.app = app
+        # 必须自己放进容器: show() 只是 tkraise(), 没摆放过的控件抬起来也看不见
+        self.grid(row=0, column=0, sticky="nsew")
 
         head = tk.Frame(self, bg=theme.BG)
         head.pack(fill="x", padx=22, pady=(14, 2))

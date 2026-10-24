@@ -47,6 +47,9 @@ class TrilingoApp(tk.Tk):
         if name not in self._frames:
             self._frames[name] = self._build(name)
         frame = self._frames[name]
+        # 兜底: 页面自己忘了 pack/grid 的话, tkraise() 抬起来的还是看不见
+        if not frame.winfo_manager():
+            frame.grid(row=0, column=0, sticky="nsew")
         if hasattr(frame, "on_show"):
             frame.on_show(**kw)
         frame.tkraise()

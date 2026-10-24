@@ -1215,3 +1215,117 @@ class Database:
         self.conn.execute("DELETE FROM minna_result WHERE lesson=?", (lesson,))
         self.conn.execute("DELETE FROM minna_progress WHERE lesson=?", (lesson,))
         self.conn.commit()
+
+    # ------------------------------------------------------------ 同步用 (生活记录 / 测试)
+    def export_life(self) -> dict:
+        """生活记录打包成可同步的结构. 只增不删, 合并时按内容去重."""
+        ledger = [
+            {"at": r["at"], "day": r["day"], "kind": r["kind"],
+             "source": r["source"], "currency": r["currency"],
+             "cents": int(r["cents"])}
+            for r in self.conn.execute("SELECT * FROM ledger ORDER BY at, id")
+        ]
+        deer = {
+            r["day"]: {"lv": int(r["level"]), "at": r["at"] or ""}
+            for r in self.conn.execute("SELECT day, level, at FROM deer")
+        }
+        return {"ledger": ledger, "deer": deer}
+
+    def apply_life(self, life: dict) -> int:
+        """把同步来的生活记录并入本机. 返回新增条数."""
+        added = 0
+        for e in (life or {}).get("ledger") or []:
+            if not isinstance(e, dict):
+                continue
+            row = self.conn.execute(
+                "SELECT 1 FROM ledger WHERE at=? AND kind=? AND currency=?"
+                " AND cents=? AND source=?",
+                (e.get("at", ""), e.get("kind", ""), e.get("currency", ""),
+                 int(e.get("cents") or 0), e.get("source", "")),
+            ).fetchone()
+            if row:
+                continue
+            self.conn.execute(
+                "INSERT INTO ledger (day,at,kind,source,currency,cents,created_at)"
+                " VALUES (?,?,?,?,?,?,?)",
+                (e.get("day", ""), e.get("at", ""), e.get("kind", ""),
+                 e.get("source", ""), e.get("currency", ""),
+                 int(e.get("cents") or 0), _now()),
+            )
+            added += 1
+        for day, rec in ((life or {}).get("deer") or {}).items():
+            if not isinstance(rec, dict):
+                continue
+            cur = self.conn.execute(
+                "SELECT at FROM deer WHERE day=?", (day,)).fetchone()
+            at = str(rec.get("at", ""))
+            if cur is not None and str(cur["at"] or "") > at:
+                continue                      # 本机这份更新
+            self.conn.execute(
+                "INSERT INTO deer (day,level,at) VALUES (?,?,?)"
+                " ON CONFLICT(day) DO UPDATE SET level=excluded.level, at=excluded.at",
+                (day, max(0, min(3, int(rec.get("lv") or 0))), at or _now()),
+            )
+            added += 1
+        if added:
+            self.conn.commit()
+        return added
+
+    def export_minna(self) -> dict:
+        """每课进度 + 该课每题的判定结果."""
+        out: dict[str, dict] = {}
+        for r in self.conn.execute("SELECT * FROM minna_progress"):
+            les = int(r["lesson"])
+            results = {
+                x["qid"]: bool(x["ok"])
+                for x in self.conn.execute(
+                    "SELECT qid, ok FROM minna_result WHERE lesson=?", (les,))
+            }
+            out[str(les)] = {
+                "status": r["status"], "section": int(r["section"] or 0),
+                "idx": int(r["idx"] or 0), "seconds": int(r["seconds"] or 0),
+                "score": int(r["score"] or 0), "total": int(r["total"] or 0),
+                "updated_at": r["updated_at"] or "", "results": results,
+            }
+        return out
+
+    def apply_minna(self, minna: dict) -> int:
+        """并入另一台设备的测试进度: 每课取较新的那份."""
+        added = 0
+        for key, rec in (minna or {}).items():
+            if not isinstance(rec, dict):
+                continue
+            try:
+                les = int(key)
+            except (TypeError, ValueError):
+                continue
+            cur = self.conn.execute(
+                "SELECT updated_at FROM minna_progress WHERE lesson=?",
+                (les,)).fetchone()
+            cur_at = str(cur["updated_at"] or "") if cur else ""
+            new_at = str(rec.get("updated_at") or "")
+            if cur_at and new_at < cur_at:
+                continue
+            if cur_at and new_at == cur_at:
+                continue                      # 同一时刻, 以本机为准
+            self.conn.execute(
+                "INSERT INTO minna_progress"
+                " (lesson,status,section,idx,seconds,score,total,started_at,finished_at,updated_at)"
+                " VALUES (?,?,?,?,?,?,?,NULL,NULL,?)"
+                " ON CONFLICT(lesson) DO UPDATE SET status=excluded.status,"
+                " section=excluded.section, idx=excluded.idx, seconds=excluded.seconds,"
+                " score=excluded.score, total=excluded.total, updated_at=excluded.updated_at",
+                (les, rec.get("status", "idle"), int(rec.get("section") or 0),
+                 int(rec.get("idx") or 0), int(rec.get("seconds") or 0),
+                 int(rec.get("score") or 0), int(rec.get("total") or 0), new_at or _now()),
+            )
+            self.conn.execute("DELETE FROM minna_result WHERE lesson=?", (les,))
+            for qid, ok in (rec.get("results") or {}).items():
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO minna_result (lesson,qid,ok) VALUES (?,?,?)",
+                    (les, qid, 1 if ok else 0),
+                )
+            added += 1
+        if added:
+            self.conn.commit()
+        return added

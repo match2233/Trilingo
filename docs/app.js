@@ -419,13 +419,32 @@ function renderSettings() {
 
 /* ------------------------------------------------------------------ 同步 */
 
+/** 本机改动 → 写回本地存储并标脏, 等待同步上传 */
+function localChanged() {
+  gh.saveLocalState(S.state);
+  gh.markPending(true);
+  renderHome();
+}
+
+// 生活记录与测试卷的进度都存在 S.state 里 (life / minna),
+// 由 core.js 的 merge 做并集, 因此天然参与跨设备同步。
+function bindModuleHooks() {
+  const hooks = { toast, getState: () => S.state, onChange: localChanged };
+  if (typeof Life !== 'undefined' && Life) Life.initLife(hooks);
+  if (typeof Minna !== 'undefined' && Minna) {
+    Minna.initMinna({ ...hooks, showView });
+  }
+}
+
 function syncQuiet() {
   if (!gh.isConfigured()) return;
   gh.syncNow()
     .then((r) => {
       S.state = r.state;
       refreshDerived();
+      gh.saveLocalState(S.state);
       renderHome();
+      renderMistakes();
       toast(r.changed ? '已同步' : '已是最新');
     })
     .catch((e) => {
@@ -445,6 +464,7 @@ async function doSync(manual) {
     const r = await gh.syncNow();
     S.state = r.state;
     refreshDerived();
+    gh.saveLocalState(S.state);
     renderAll();
     toast(r.changed ? `同步完成（${r.sha}）` : '已是最新，无需同步');
   } catch (e) {
@@ -568,12 +588,9 @@ function bind() {
 async function init() {
   bind();
   // 这三个模块是"附加功能", 任何一个没加载成功都不该影响背单词主流程
-  try { if (typeof Life !== 'undefined' && Life) Life.initLife({ toast }); } catch (e) { /* */ }
+  bindModuleHooks();
   try {
-    if (typeof Minna !== 'undefined' && Minna) {
-      Minna.initMinna({ showView, toast });
-      await Minna.loadBank();
-    }
+    if (typeof Minna !== 'undefined' && Minna) await Minna.loadBank();
   } catch (e) { /* */ }
   refreshDerived();
   renderAll();

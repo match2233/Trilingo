@@ -81,7 +81,62 @@ def empty_state() -> dict:
         "edits": {},
         "base": {"stats": {}, "mistakes": {}, "days": []},
         "events": [],
+        # 生活记录与测试卷进度: 同样跨设备同步, 但没有"事件流"语义,
+        # 直接按 id/日期 求并集 (见 _merge_ledger / _merge_deer / _merge_minna)
+        "life": {"ledger": [], "deer": {}},
+        "minna": {},
     }
+
+
+def ledger_key(e: dict) -> str:
+    """账本条目的稳定身份: 时刻 + 类型 + 币种 + 金额 + 来源.
+
+    两台设备各自自增 id, 光用 id 会撞; 又因为账本只增不删, 用内容做键
+    就能天然去重 (同一秒同一笔重复提交几乎不可能)。
+    """
+    return "|".join(str(e.get(k, "")) for k in
+                    ("at", "kind", "currency", "cents", "source"))
+
+
+def _merge_ledger(a: list, b: list) -> list:
+    seen: dict[str, dict] = {}
+    for src in (a or [], b or []):
+        for e in src:
+            if not isinstance(e, dict):
+                continue
+            k = ledger_key(e)
+            if k and k not in seen:
+                seen[k] = e
+    return sorted(seen.values(), key=lambda e: (str(e.get("at", "")), ledger_key(e)))
+
+
+def _merge_deer(a: dict, b: dict) -> dict:
+    out: dict[str, dict] = {}
+    for src in (a or {}, b or {}):
+        for day, rec in src.items():
+            if not isinstance(rec, dict):
+                continue
+            cur = out.get(day)
+            if cur is None or str(rec.get("at", "")) >= str(cur.get("at", "")):
+                out[day] = rec
+    return out
+
+
+def _merge_minna(a: dict, b: dict) -> dict:
+    """每课取 updated_at 较新的那份进度 (含该课的作答结果)."""
+    def rank(k):
+        return (str(k.get("updated_at", "")), int(k.get("score") or 0),
+                int(k.get("seconds") or 0))
+
+    out: dict[str, dict] = {}
+    for src in (a or {}, b or {}):
+        for key, rec in src.items():
+            if not isinstance(rec, dict):
+                continue
+            cur = out.get(key)
+            if cur is None or rank(rec) >= rank(cur):
+                out[key] = rec
+    return out
 
 
 # ------------------------------------------------------------------ 推导
@@ -278,6 +333,15 @@ def merge(local: dict, remote: dict, prefer: str | None = None) -> dict:
             seen[i] = e
     out["events"] = sorted(seen.values(), key=lambda e: (e.get("t", 0), e.get("i", "")))
 
+    # 生活记录与测试卷: 都是"各自独立、可以求并集"的数据, 不受 prefer 影响 ——
+    # 账本只增不删, 记鹿按天覆盖, 每课进度取较新的那份。
+    ll, rl = local.get("life") or {}, remote.get("life") or {}
+    out["life"] = {
+        "ledger": _merge_ledger(ll.get("ledger") or [], rl.get("ledger") or []),
+        "deer": _merge_deer(ll.get("deer") or {}, rl.get("deer") or {}),
+    }
+    out["minna"] = _merge_minna(local.get("minna") or {}, remote.get("minna") or {})
+
     return _compact(_normalize(out))
 
 
@@ -412,6 +476,12 @@ def _normalize(state: dict) -> dict:
     for lang in ("en", "jp"):
         out["words"].setdefault(lang, [])
     out["events"] = out.get("events") or []
+    life = out.get("life") or {}
+    out["life"] = {
+        "ledger": life.get("ledger") or [],
+        "deer": life.get("deer") or {},
+    }
+    out["minna"] = out.get("minna") or {}
     return out
 
 

@@ -1,7 +1,9 @@
-/* 生活记录 (PWA 版): 记账 + 记鹿. 只存本机 localStorage, 不参与同步. */
-
-const LKEY = 'trilingo.ledger.v1';
-const DKEY = 'trilingo.deer.v1';
+/* 生活记录 (PWA 版): 记账 + 记鹿.
+ *
+ * 数据直接放在同步状态里 (state.life), 这样:
+ *   * 本机持久化走 gh.saveLocalState, 不另开一套存储
+ *   * 跨设备同步自动生效 (core.js 的 merge 会对 life 求并集)
+ */
 
 const CURRENCIES = ['CNY', 'JPY', 'USD'];
 const CUR_NAME = { CNY: '人民币', JPY: '日元', USD: '美元' };
@@ -15,10 +17,14 @@ const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 let toast = () => {};
+let getState = () => ({ life: { ledger: [], deer: {} } });
+let onChange = () => {};
 let currency = 'CNY';
 
 export function initLife(hooks) {
   toast = hooks.toast || toast;
+  getState = hooks.getState || getState;
+  onChange = hooks.onChange || onChange;
   bind();
 }
 
@@ -40,20 +46,22 @@ function parseMoney(text) {
   return Math.round(parseFloat(s) * 100);
 }
 
-function loadLedger() {
-  try { return JSON.parse(localStorage.getItem(LKEY) || '[]'); } catch { return []; }
+function life() {
+  const st = getState() || {};
+  if (!st.life) st.life = { ledger: [], deer: {} };
+  if (!Array.isArray(st.life.ledger)) st.life.ledger = [];
+  if (!st.life.deer || typeof st.life.deer !== 'object') st.life.deer = {};
+  return st.life;
 }
 
-function saveLedger(list) {
-  try { localStorage.setItem(LKEY, JSON.stringify(list)); } catch { /* ignore */ }
-}
+function loadLedger() { return life().ledger; }
 
-function loadDeer() {
-  try { return JSON.parse(localStorage.getItem(DKEY) || '{}'); } catch { return {}; }
-}
+function loadDeer() { return life().deer; }
 
-function saveDeer(obj) {
-  try { localStorage.setItem(DKEY, JSON.stringify(obj)); } catch { /* ignore */ }
+/** 记鹿: 内部结构 { day: {lv, at} }, 这里取纯等级供界面用 */
+function deerLevel(day) {
+  const rec = loadDeer()[day];
+  return rec && typeof rec === 'object' ? Number(rec.lv) : undefined;
 }
 
 /* ------------------------------------------------------------------ 记账 */
@@ -91,16 +99,16 @@ function submit(kind) {
   if (cents <= 0) { toast('金额要大于 0'); amtEl.focus(); return; }
   const all = loadLedger();
   const now = new Date();
+  const at = `${todayStr(now)}T${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
   all.push({
-    id: Date.now() + Math.random(),
     day: todayStr(now),
-    at: `${todayStr(now)}T${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`,
+    at,
     kind,
     source: (srcEl.value || '').trim() || '未填写',
     currency,
     cents,
   });
-  saveLedger(all);
+  onChange();
   amtEl.value = '';
   srcEl.value = '';
   renderLedger();
@@ -117,8 +125,7 @@ export function targetDay() {
 
 export function renderDeer() {
   const day = targetDay();
-  const all = loadDeer();
-  const cur = all[day];
+  const cur = deerLevel(day);
 
   $('deerDay').textContent = `填写 ${day}（昨天）的数据` +
     (cur === undefined ? '：还没有记录' : `：已记为 ${cur}（${DEER_LABEL[cur]}），再按就是改掉这个值`);
@@ -129,9 +136,8 @@ export function renderDeer() {
   $('deerRow').querySelectorAll('.deer-btn').forEach((b) => {
     b.onclick = () => {
       const lv = Number(b.dataset.lv);
-      const data = loadDeer();
-      data[day] = lv;
-      saveDeer(data);
+      loadDeer()[day] = { lv, at: new Date().toISOString().slice(0, 19) };
+      onChange();
       renderDeer();
       toast(`已记 ${day} 为 ${lv}`);
     };
@@ -147,13 +153,13 @@ export function renderDeer() {
   const prefix = `${y}-${String(m + 1).padStart(2, '0')}`;
   let total = 0;
   for (let d = 1; d <= days; d += 1) {
-    const v = all[`${prefix}-${String(d).padStart(2, '0')}`];
+    const v = deerLevel(`${prefix}-${String(d).padStart(2, '0')}`);
     if (v !== undefined) total += v;
   }
   let cells = '';
   for (let i = 0; i < lead; i += 1) cells += '<div></div>';
   for (let d = 1; d <= days; d += 1) {
-    const v = all[`${prefix}-${String(d).padStart(2, '0')}`];
+    const v = deerLevel(`${prefix}-${String(d).padStart(2, '0')}`);
     const bg = v === undefined ? '' : DEER_COLOR[v];
     const fg = v === undefined ? '' : DEER_TEXT[v];
     cells += `<div class="deer-day" style="background:${bg || 'transparent'};color:${fg || 'var(--muted)'}">
@@ -195,10 +201,11 @@ export function ledgerFooter() {
 }
 
 export function deerFooter() {
-  const all = loadDeer();
   const now = new Date();
   const prefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   let total = 0;
-  Object.entries(all).forEach(([d, v]) => { if (d.startsWith(prefix)) total += v; });
+  Object.entries(loadDeer()).forEach(([d, rec]) => {
+    if (d.startsWith(prefix) && rec && typeof rec === 'object') total += Number(rec.lv) || 0;
+  });
   return total ? `本月 ${total} 次` : '';
 }

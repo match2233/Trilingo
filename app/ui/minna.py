@@ -50,6 +50,13 @@ class MinnaListFrame(tk.Frame):
         for les in minna.lessons():
             self._make_row(sc.body, les)
 
+        # 版权标注: 题库是从出版教辅转录的, 注明来源
+        tk.Label(self, justify="left", anchor="w", bg=theme.BG, fg=theme.MUTED,
+                 font=theme.f(9),
+                 text="题库来源：《新版中日交流标准日本语（初级上）同步测试卷》"
+                      "（版权归原出版方所有，仅供个人学习使用）",
+                 ).pack(fill="x", padx=24, pady=(0, 10))
+
     def _make_row(self, parent, les: dict) -> None:
         num = les["lesson"]
         card = Card(parent)

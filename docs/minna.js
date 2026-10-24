@@ -9,7 +9,6 @@
  *   translate 一题一屏 -> 显示答案 -> 对/错
  */
 
-const KEY = 'trilingo.minna.v1';
 const CORRECT_WAIT = 5000;
 
 export const M = {
@@ -35,25 +34,29 @@ let hooks = { showView: () => {}, toast: () => {} };
 
 /* ------------------------------------------------------------------ 存储 */
 
-function loadAll() {
-  try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch { return {}; }
+// 进度直接放在同步状态里 (state.minna), 随同步一起走, 不再单独存 localStorage
+let getState = () => ({ minna: {} });
+let onChange = () => {};
+
+function allProgress() {
+  const st = getState() || {};
+  if (!st.minna || typeof st.minna !== 'object') st.minna = {};
+  return st.minna;
 }
 
-function saveAll(obj) {
-  try { localStorage.setItem(KEY, JSON.stringify(obj)); } catch { /* 隐私模式忽略 */ }
-}
-
-function prog(n) { return loadAll()[n] || null; }
+function prog(n) { return allProgress()[n] || null; }
 
 function patchProg(n, patch) {
-  const all = loadAll();
-  all[n] = Object.assign({ status: 'idle', section: 0, idx: 0, seconds: 0,
-    score: 0, total: 0, results: {} }, all[n] || {}, patch);
-  saveAll(all);
+  const all = allProgress();
+  all[n] = Object.assign({
+    status: 'idle', section: 0, idx: 0, seconds: 0,
+    score: 0, total: 0, results: {}, updated_at: '',
+  }, all[n] || {}, patch, { updated_at: new Date().toISOString().slice(0, 19) });
+  onChange();
   return all[n];
 }
 
-export function progressMap() { return loadAll(); }
+export function progressMap() { return allProgress(); }
 
 /* ------------------------------------------------------------------ 题库 */
 
@@ -134,7 +137,7 @@ export function fmtSec(sec) {
 /* ------------------------------------------------------------------ 列表页 */
 
 export function renderList() {
-  const all = loadAll();
+  const all = allProgress();
   const les = lessons();
   let done = 0;
   const rows = les.map((l) => {
@@ -543,16 +546,19 @@ function renderPaper(justFinished) {
   $('paperBack').onclick = () => { renderList(); hooks.showView('minna'); };
   $('paperRedo').onclick = () => {
     if (!confirm('清空这一课的作答记录，重新开始？')) return;
-    const all = loadAll();
-    delete all[M.lesson];
-    saveAll(all);
+    delete allProgress()[M.lesson];
+    onChange();
     openLesson(M.lesson, false);
   };
   window.scrollTo(0, 0);
 }
 
 /* ------------------------------------------------------------------ 外部挂钩 */
-export function initMinna(h) { hooks = h; }
+export function initMinna(h) {
+  hooks = h;
+  if (h.getState) getState = h.getState;
+  if (h.onChange) onChange = h.onChange;
+}
 export function bankLessons() { return lessons(); }
 
 /** 计时器/用时专用: 永远给出 00:00 形式 (fmtSec 在 0 时返回 "—", 适合"无记录") */

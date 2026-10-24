@@ -39,8 +39,14 @@ class FlatButton(tk.Frame):
 
         self._subtitle_font = theme.f(9)
         self._subtitle_pad = (padx, pady, anchor)
+        # 标题与副标题装在同一个盒子里, 上下用弹性留白夹住 —— 这样副标题
+        # 永远紧跟标题下方, 而不是被顶到按钮最底部。
+        self._box = tk.Frame(self, bg=bg)
+        self._box.pack(expand=True, fill="both")
+        self._spacers = (tk.Frame(self._box, bg=bg), tk.Frame(self._box, bg=bg))
+        self._spacers[0].pack(expand=True, fill="both")
         self._label = tk.Label(
-            self,
+            self._box,
             text=text,
             bg=bg,
             fg=fg,
@@ -50,14 +56,16 @@ class FlatButton(tk.Frame):
             anchor=anchor,
             justify="center",
         )
-        self._label.pack(fill="both", expand=True)
+        self._label.pack(fill="x")
         self._subtitle = None
         if subtitle:
             self.set_subtitle(subtitle)
+        self._spacers[1].pack(expand=True, fill="both")
         if width:
             self.configure(width=width)
 
-        for w in (self, self._label) + ((self._subtitle,) if self._subtitle else ()):
+        for w in (self, self._box, self._label, *self._spacers) + (
+                (self._subtitle,) if self._subtitle else ()):
             w.bind("<Enter>", self._on_enter)
             w.bind("<Leave>", self._on_leave)
             w.bind("<Button-1>", self._on_press)
@@ -94,6 +102,9 @@ class FlatButton(tk.Frame):
 
     def _paint(self, bg):
         self.configure(bg=bg)
+        self._box.configure(bg=bg)
+        for sp in getattr(self, "_spacers", ()):
+            sp.configure(bg=bg)
         self._label.configure(bg=bg)
         if self._subtitle:
             self._subtitle.configure(bg=bg)
@@ -165,10 +176,12 @@ class FlatButton(tk.Frame):
         padx, pady, anchor = self._subtitle_pad
         if self._subtitle is None:
             self._subtitle = tk.Label(
-                self, text=text, bg=self._bg, fg=theme.MUTED,
+                self._box, text=text, bg=self._bg, fg=theme.MUTED,
                 font=self._subtitle_font, anchor=anchor,
             )
-            self._subtitle.pack(fill="x", padx=padx, pady=(0, pady))
+            # 插在"标题"和"底部弹性留白"之间: 副标题紧跟标题下方
+            self._subtitle.pack(fill="x", padx=padx, pady=(2, 0),
+                                before=self._spacers[1])
             self._subtitle.bind("<Enter>", self._on_enter)
             self._subtitle.bind("<Leave>", self._on_leave)
             self._subtitle.bind("<Button-1>", self._on_press)

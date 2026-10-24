@@ -52,7 +52,54 @@ export function emptyState() {
     edits: {},
     base: { stats: {}, mistakes: {}, days: [], done: {}, dropped: {} },
     events: [],
+    // 生活记录与测试卷进度: 与桌面端同构, 合并即求并集
+    life: { ledger: [], deer: {} },
+    minna: {},
   };
+}
+
+/** 账本条目的稳定身份 (时刻+类型+币种+金额+来源), 与桌面端一致 */
+export const ledgerKey = (e) => ['at', 'kind', 'currency', 'cents', 'source']
+  .map((k) => String(e[k] == null ? '' : e[k])).join('|');
+
+function mergeLedger(a, b) {
+  const seen = new Map();
+  for (const src of [a || [], b || []]) {
+    for (const e of src) {
+      if (!e || typeof e !== 'object') continue;
+      const k = ledgerKey(e);
+      if (k && !seen.has(k)) seen.set(k, e);
+    }
+  }
+  return [...seen.values()].sort((x, y) => {
+    const ax = String(x.at || ''); const ay = String(y.at || '');
+    return ax === ay ? ledgerKey(x).localeCompare(ledgerKey(y)) : ax.localeCompare(ay);
+  });
+}
+
+function mergeDeer(a, b) {
+  const out = {};
+  for (const src of [a || {}, b || {}]) {
+    for (const [day, rec] of Object.entries(src)) {
+      if (!rec || typeof rec !== 'object') continue;
+      const cur = out[day];
+      if (!cur || String(rec.at || '') >= String(cur.at || '')) out[day] = rec;
+    }
+  }
+  return out;
+}
+
+function mergeMinna(a, b) {
+  const rank = (r) => [String(r.updated_at || ''), Number(r.score || 0),
+    Number(r.seconds || 0)].join('|');
+  const out = {};
+  for (const src of [a || {}, b || {}]) {
+    for (const [k, rec] of Object.entries(src)) {
+      if (!rec || typeof rec !== 'object') continue;
+      if (!out[k] || rank(rec) >= rank(out[k])) out[k] = rec;
+    }
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------------ 推导 */
@@ -231,6 +278,15 @@ export function merge(local, remote, prefer = null) {
     (a, b) => (a.t || 0) - (b.t || 0) || (a.i < b.i ? -1 : a.i > b.i ? 1 : 0)
   );
 
+  // 生活记录与测试卷: 各设备互相补充, 不受 prefer 影响
+  const ll = local.life || {};
+  const rl = remote.life || {};
+  out.life = {
+    ledger: mergeLedger(ll.ledger, rl.ledger),
+    deer: mergeDeer(ll.deer, rl.deer),
+  };
+  out.minna = mergeMinna(local.minna, remote.minna);
+
   return compact(normalize(out));
 }
 
@@ -359,6 +415,9 @@ function normalize(state) {
   out.words.en = out.words.en || [];
   out.words.jp = out.words.jp || [];
   out.events = out.events || [];
+  const life = out.life || {};
+  out.life = { ledger: life.ledger || [], deer: life.deer || {} };
+  out.minna = out.minna || {};
   return out;
 }
 

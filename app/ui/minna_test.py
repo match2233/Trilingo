@@ -31,7 +31,9 @@ class MinnaTestFrame(tk.Frame):
         self.results: dict[str, bool] = {}
         self.sec_i = 0
         self.item_i = 0
-        self.started_at: dt.datetime | None = None
+        self.started_at: dt.datetime | None = None      # 兼容旧字段, 不再用于计时
+        self._base_seconds: int = 0                     # 之前累计的作答秒数
+        self._session_start: dt.datetime | None = None  # 本次进入的时间点
         self._tick_id = None
         self._next_id = None
         self._timer_label: tk.Label | None = None
@@ -111,12 +113,12 @@ class MinnaTestFrame(tk.Frame):
             self.app.db.minna_start(lesson, total)
             self.results = {}
             self.sec_i = self.item_i = 0
-            started = dt.datetime.now()
+            self._base_seconds = 0
         else:
             self.sec_i = min(int(prog["section"] or 0), len(self.sections) - 1)
             self.item_i = int(prog["idx"] or 0)
-            started = _parse_dt(prog["started_at"]) or dt.datetime.now()
-        self.started_at = started
+            self._base_seconds = int(prog["seconds"] or 0)
+        self._session_start = dt.datetime.now()
         self.title.configure(text=f"第 {lesson} 课")
         self.timer_cap.configure(text="用时")
         self.timer.pack(side="right", padx=(10, 0))
@@ -138,9 +140,16 @@ class MinnaTestFrame(tk.Frame):
 
     # ------------------------------------------------------------ 计时
     def elapsed(self) -> int:
-        if not self.started_at:
-            return 0
-        return max(0, int((dt.datetime.now() - self.started_at).total_seconds()))
+        """本次 + 之前累计的作答秒数.
+
+        以前直接用 "当前时间 − 首次打开时间", 于是中途退出隔天再进来,
+        计时会从几小时甚至几天开始 (实际见过一进去就 27 分钟)。
+        现在只累计"真正在做"的时间: 恢复时把上次存下的秒数当基数。
+        """
+        if not self._session_start:
+            return int(self._base_seconds)
+        delta = (dt.datetime.now() - self._session_start).total_seconds()
+        return max(0, int(self._base_seconds + delta))
 
     def _tick(self) -> None:
         if self._mode != "test":

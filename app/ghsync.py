@@ -181,6 +181,9 @@ def state_from_db(db, words_en: bool = True) -> dict:
     state["events"] = [dict(r) for r in db.conn.execute(
         "SELECT id AS i, ts AS t, device AS d, lang AS l, word AS w, ok AS o, day FROM events"
     )]
+    # 生活记录与测试卷进度: 也参与跨设备同步
+    state["life"] = db.export_life()
+    state["minna"] = db.export_minna()
     return state
 
 
@@ -193,6 +196,13 @@ def apply_state_to_db(db, state: dict) -> None:
       2. 合并词条释义/音标/声调
     """
     sc.apply_edits(state)
+
+    # 生活记录 / 测试卷进度: 纯并集, 各设备互不覆盖
+    try:
+        db.apply_life(state.get("life") or {})
+        db.apply_minna(state.get("minna") or {})
+    except Exception as exc:      # noqa: BLE001
+        log.warning("生活记录/测试进度合并失败: %s", exc)
 
     for rec in state["words"].get("en") or []:
         db.apply_synced_en(rec)

@@ -61,7 +61,8 @@ def main() -> int:
                 elif "假名改为汉字" in title:
                     if ratio(prompt, lambda c: HIRA(c) or KATA(c)) < 0.6:
                         warn.append(f"{qid}: 题干不像假名 ({prompt})")
-                    if ans and ratio(ans, CJK) < 0.4:
+                    # 汉语词可能带送假名 (楽しい / 伝える), 只要有汉字就行
+                    if ans and not any(CJK(c) for c in ans):
                         problems.append(f"{qid}: 答案不像汉字 ({ans})")
                 elif "译成汉语" in title:
                     if ans and (ratio(ans, CJK) < 0.5 or ratio(ans, lambda c: HIRA(c) or KATA(c)) > 0.3):

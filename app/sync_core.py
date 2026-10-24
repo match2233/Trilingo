@@ -85,6 +85,8 @@ def empty_state() -> dict:
         # 直接按 id/日期 求并集 (见 _merge_ledger / _merge_deer / _merge_minna)
         "life": {"ledger": [], "deer": {}},
         "minna": {},
+        # 收藏夹: {qid: {note, at}} —— 求并集, 同一题取较新的笔记
+        "fav": {},
     }
 
 
@@ -124,6 +126,7 @@ def _merge_deer(a: dict, b: dict) -> dict:
 
 def _merge_minna(a: dict, b: dict) -> dict:
     """每课取 updated_at 较新的那份进度 (含该课的作答结果)."""
+
     def rank(k):
         return (str(k.get("updated_at", "")), int(k.get("score") or 0),
                 int(k.get("seconds") or 0))
@@ -136,6 +139,19 @@ def _merge_minna(a: dict, b: dict) -> dict:
             cur = out.get(key)
             if cur is None or rank(rec) >= rank(cur):
                 out[key] = rec
+    return out
+
+
+def _merge_fav(a: dict, b: dict) -> dict:
+    """收藏夹求并集: 同一题保留较新的笔记 (取消收藏不在两端传播)."""
+    out: dict[str, dict] = {}
+    for src in (a or {}, b or {}):
+        for qid, rec in src.items():
+            if not isinstance(rec, dict):
+                continue
+            cur = out.get(qid)
+            if cur is None or str(rec.get("at", "")) >= str(cur.get("at", "")):
+                out[qid] = rec
     return out
 
 
@@ -341,6 +357,7 @@ def merge(local: dict, remote: dict, prefer: str | None = None) -> dict:
         "deer": _merge_deer(ll.get("deer") or {}, rl.get("deer") or {}),
     }
     out["minna"] = _merge_minna(local.get("minna") or {}, remote.get("minna") or {})
+    out["fav"] = _merge_fav(local.get("fav") or {}, remote.get("fav") or {})
 
     return _compact(_normalize(out))
 
@@ -482,6 +499,7 @@ def _normalize(state: dict) -> dict:
         "deer": life.get("deer") or {},
     }
     out["minna"] = out.get("minna") or {}
+    out["fav"] = out.get("fav") or {}
     return out
 
 

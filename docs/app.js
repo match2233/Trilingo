@@ -296,6 +296,13 @@ function renderHome() {
     ? `已完成 ${mDone}/${mTotal} 课`
     : (mDoing ? `有 ${mDoing} 课未做完` : (mTotal ? `共 ${mTotal} 课 · 未开始` : '题库未加载'));
 
+  // 收藏夹: 有收藏时把底部导航那颗星点亮
+  try {
+    const favs = (typeof Minna !== 'undefined' && Minna) ? Minna.favList() : [];
+    const tab = document.querySelector('#tabs button[data-view="fav"]');
+    if (tab) tab.querySelector('.ic').textContent = favs.length ? '⭐' : '☆';
+  } catch (e) { /* ignore */ }
+
   // 生活记录
   let lf = '';
   let df = '';
@@ -478,12 +485,17 @@ async function doSync(manual) {
 /* ------------------------------------------------------------------ 视图切换 */
 
 function showView(name) {
+  // 底部导航的「收藏夹」用 data-view="fav", 实际页面是 minnaFav
+  const target = name === 'fav' ? 'minnaFav' : name;
+  if (target === 'minnaFav' && typeof Minna !== 'undefined' && Minna) {
+    try { Minna.renderFav(); } catch (e) { /* 题库未加载时留空 */ }
+  }
   document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
-  const el = $(name);
+  const el = $(target);
   if (el) el.classList.add('active');
-  const full = name === 'quiz' || name === 'minnaTest';
+  const full = target === 'quiz' || target === 'minnaTest';
   $('tabs').style.display = full ? 'none' : 'flex';
-  document.body.classList.toggle('mt-mode', name === 'minnaTest');
+  document.body.classList.toggle('mt-mode', target === 'minnaTest');
   document.querySelectorAll('#tabs button').forEach((b) =>
     b.classList.toggle('on', b.dataset.view === name));
   window.scrollTo(0, 0);
@@ -532,8 +544,8 @@ function bind() {
   $('ledgerBack').onclick = () => showView('life');
   $('deerBack').onclick = () => showView('life');
   $('lifeBack').onclick = () => showView('home');
-  $('sentBack').onclick = () => showView('home');
   $('minnaBack').onclick = () => { Minna.renderList(); showView('home'); };
+  $('favBack').onclick = () => { Minna.renderList(); showView('minna'); };
   $('mtBack').onclick = () => Minna.leave();
 
   document.querySelectorAll('#tabs button').forEach((b) => {

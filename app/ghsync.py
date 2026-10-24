@@ -184,6 +184,7 @@ def state_from_db(db, words_en: bool = True) -> dict:
     # 生活记录与测试卷进度: 也参与跨设备同步
     state["life"] = db.export_life()
     state["minna"] = db.export_minna()
+    state["fav"] = db.export_fav()
     return state
 
 
@@ -201,6 +202,7 @@ def apply_state_to_db(db, state: dict) -> None:
     try:
         db.apply_life(state.get("life") or {})
         db.apply_minna(state.get("minna") or {})
+        db.apply_fav(state.get("fav") or {})
     except Exception as exc:      # noqa: BLE001
         log.warning("生活记录/测试进度合并失败: %s", exc)
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -1274,6 +1275,51 @@ class Database:
         self.conn.execute(
             "DELETE FROM minna_fav WHERE lesson=? AND qid=?", (lesson, qid))
         self.conn.commit()
+
+    # ------------------------------------------------------------ 收藏同步
+    def export_fav(self) -> dict:
+        """收藏打包成 {qid: {note, at}} —— 与手机端同一结构, 合并即求并集."""
+        out: dict[str, dict] = {}
+        for r in self.conn.execute(
+                "SELECT lesson, qid, note, updated_at FROM minna_fav"):
+            out[r["qid"]] = {"note": r["note"] or "",
+                             "at": r["updated_at"] or ""}
+        return out
+
+    def apply_fav(self, fav: dict) -> int:
+        """并入另一台设备的收藏: 同一题取较新的笔记, 没见过的直接加."""
+        added = 0
+        for qid, rec in (fav or {}).items():
+            if not isinstance(rec, dict):
+                continue
+            m = re.match(r"L(\d+)-", str(qid))
+            if not m:
+                continue
+            lesson = int(m.group(1))
+            cur = self.conn.execute(
+                "SELECT note, updated_at FROM minna_fav WHERE lesson=? AND qid=?",
+                (lesson, qid)).fetchone()
+            note = str(rec.get("note") or "")
+            at = str(rec.get("at") or "")
+            if cur is None:
+                self.conn.execute(
+                    "INSERT INTO minna_fav (lesson, qid, note, created_at, updated_at)"
+                    " VALUES (?,?,?,?,?)", (lesson, qid, note, at or _now(), at or _now()))
+                added += 1
+            elif at and at > str(cur["updated_at"] or "") and note != (cur["note"] or ""):
+                self.conn.execute(
+                    "UPDATE minna_fav SET note=?, updated_at=? WHERE lesson=? AND qid=?",
+                    (note, at, lesson, qid))
+                added += 1
+            elif note and not (cur["note"] or ""):
+                # 本机有这条但没有笔记, 对方有笔记 -> 补上
+                self.conn.execute(
+                    "UPDATE minna_fav SET note=? WHERE lesson=? AND qid=?",
+                    (note, lesson, qid))
+                added += 1
+        if added:
+            self.conn.commit()
+        return added
 
     # ------------------------------------------------------------ 同步用 (生活记录 / 测试)
     def export_life(self) -> dict:

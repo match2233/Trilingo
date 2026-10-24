@@ -55,6 +55,7 @@ export function emptyState() {
     // 生活记录与测试卷进度: 与桌面端同构, 合并即求并集
     life: { ledger: [], deer: {} },
     minna: {},
+    fav: {},
   };
 }
 
@@ -286,8 +287,21 @@ export function merge(local, remote, prefer = null) {
     deer: mergeDeer(ll.deer, rl.deer),
   };
   out.minna = mergeMinna(local.minna, remote.minna);
+  out.fav = mergeFav(local.fav, remote.fav);
 
   return compact(normalize(out));
+}
+
+function mergeFav(a, b) {
+  const out = {};
+  for (const src of [a || {}, b || {}]) {
+    for (const [qid, rec] of Object.entries(src)) {
+      if (!rec || typeof rec !== 'object') continue;
+      const cur = out[qid];
+      if (!cur || String(rec.at || '') >= String(cur.at || '')) out[qid] = rec;
+    }
+  }
+  return out;
 }
 
 /** 按 prefer 返回 [优先方, 另一方] */
@@ -418,6 +432,7 @@ function normalize(state) {
   const life = out.life || {};
   out.life = { ledger: life.ledger || [], deer: life.deer || {} };
   out.minna = out.minna || {};
+  out.fav = out.fav || {};
   return out;
 }
 

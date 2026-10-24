@@ -1,4 +1,4 @@
-﻿/* 新标日测试 (PWA 版) —— 与电脑端同一份题库、同一套交互逻辑。
+/* 新标日测试 (PWA 版) —— 与电脑端同一份题库、同一套交互逻辑。
  *
  * 题库: minna_tests.json (由 tools/build_minna_tests.py 生成, 与桌面共用)
  * 进度: localStorage, 每台设备各记各的, 不参与同步
@@ -12,6 +12,7 @@
 import * as Llm from './llm.js';
 
 const CORRECT_WAIT = 5000;
+const KIND_NAME = { fill: '填空', choice: '选择', translate: '翻译' };
 
 export const M = {
   bank: null,
@@ -59,6 +60,110 @@ function patchProg(n, patch) {
 }
 
 export function progressMap() { return allProgress(); }
+
+/* ------------------------------------------------------------------ 收藏 */
+
+/** 收藏存在同步状态里 (state.fav), 结构 { "L01-S1-3": {note, at} } */
+function allFav() {
+  const st = getState() || {};
+  if (!st.fav || typeof st.fav !== 'object') st.fav = {};
+  return st.fav;
+}
+
+export function isFav(qid) { return Boolean(allFav()[qid]); }
+
+function toggleFav(qid) {
+  const fav = allFav();
+  if (fav[qid]) delete fav[qid];
+  else fav[qid] = { note: '', at: new Date().toISOString().slice(0, 19) };
+  onChange();
+  return Boolean(fav[qid]);
+}
+
+function setFavNote(qid, note) {
+  const fav = allFav();
+  fav[qid] = { note: String(note || ''), at: new Date().toISOString().slice(0, 19) };
+  onChange();
+}
+
+function dropFav(qid) {
+  delete allFav()[qid];
+  onChange();
+}
+
+/** 收藏夹: 按课、题号排序, 并把题库里对应的题目找回来 */
+export function favList() {
+  const fav = allFav();
+  const out = [];
+  for (const [qid, rec] of Object.entries(fav)) {
+    const m = /^L(\d+)-S(\d+)-(\d+)$/.exec(qid);
+    if (!m) continue;
+    const les = lessons().find((l) => Number(l.lesson) === Number(m[1]));
+    if (!les) continue;
+    const sec = (les.sections || []).find((s) => Number(s.no) === Number(m[2]));
+    const it = sec && (sec.items || []).find((x) => x.id === qid);
+    out.push({
+      qid, lesson: Number(m[1]), secNo: Number(m[2]),
+      kind: sec ? sec.kind : '', title: sec ? sec.title : '',
+      prompt: it ? it.prompt : '（题目已不在题库里）',
+      answer: it ? it.answer : '',
+      options: it ? (it.options || []) : [],
+      note: (rec && rec.note) || '',
+    });
+  }
+  out.sort((a, b) => a.lesson - b.lesson || a.secNo - b.secNo
+    || a.qid.localeCompare(b.qid));
+  return out;
+}
+
+function favAnswer(f) {
+  if (f.answer === null || f.answer === undefined || f.answer === '') return '（未提供答案）';
+  if (f.kind === 'choice' && typeof f.answer === 'number') {
+    const mark = '①②③④⑤⑥'[f.answer - 1] || f.answer;
+    return `${mark} ${f.options[f.answer - 1] || ''}`.trim();
+  }
+  return String(f.answer);
+}
+
+/** 收藏夹列表 */
+export function renderFav() {
+  const list = $('favList');
+  if (!list) return;
+  const favs = favList();
+  const withNote = favs.filter((f) => (f.note || '').trim()).length;
+  $('favSummary').textContent = `共 ${favs.length} 题`
+    + (withNote ? `　·　${withNote} 题有笔记` : '');
+  if (!favs.length) {
+    list.innerHTML = '<div class="minna-row"><span class="sub">还没有收藏。'
+      + '看试卷时点题目左边的 ☆ 就能收藏，收藏后可以写笔记。</span></div>';
+    return;
+  }
+  list.innerHTML = favs.map((f) => `
+    <div class="fav-card" data-qid="${f.qid}">
+      <div class="fav-top">
+        <span class="sub">第 ${f.lesson} 课　大${f.secNo}　${KIND_NAME[f.kind] || ''}</span>
+        <button class="ghost fav-edit" data-qid="${f.qid}">编辑笔记</button>
+        <button class="ghost fav-del" data-qid="${f.qid}">取消收藏</button>
+      </div>
+      <div class="fav-q">${esc(f.prompt)}</div>
+      <div class="fav-a">${esc(favAnswer(f))}</div>
+      ${f.note ? `<div class="fav-note">笔记：${esc(f.note)}</div>`
+    : '<div class="sub" style="margin-top:6px">（还没有笔记）</div>'}
+    </div>`).join('');
+  list.querySelectorAll('.fav-edit').forEach((b) => {
+    b.onclick = () => {
+      const qid = b.dataset.qid;
+      const cur = (allFav()[qid] || {}).note || '';
+      const txt = window.prompt('写点什么（这句话为什么错 / 记哪个用法）', cur);
+      if (txt === null) return;
+      setFavNote(qid, txt.trim());
+      renderFav();
+    };
+  });
+  list.querySelectorAll('.fav-del').forEach((b) => {
+    b.onclick = () => { dropFav(b.dataset.qid); renderFav(); };
+  });
+}
 
 /* ------------------------------------------------------------------ 题库 */
 
@@ -555,33 +660,56 @@ function renderPaper(justFinished) {
     ? '本课已完成，下面是整张试卷，上下滑动翻看，错题已标红'
     : '已完成的课直接显示整张试卷，上下滑动翻看';
 
+  // 与电脑端一致的排版: 填空四列、选择题一行(题干→选项→正确项)、
+  // 翻译一行(题干→译文)，不再出现"答案"二字
   const html = secs.map((sec) => {
     const items = sec.items.map((it, i) => {
       const ok = M.results[it.id];
-      let txt = esc(it.prompt);
-      if (sec.kind === 'choice') {
-        txt += '　' + (it.options || []).map((o, j) =>
-          `${marks[j] || j + 1}${esc(o)}`).join(' ');
+      const bad = ok === false ? ' bad' : '';
+      const star = `<span class="pstar" data-qid="${it.id}">${isFav(it.id) ? '★' : '☆'}</span>`;
+      if (sec.kind === 'fill') {
+        const ans = it.answer || '—';
+        return `<div class="paper-cell${bad}">${star}<b>${i + 1}</b>`
+          + `<span class="pq">${esc(it.prompt)}</span>`
+          + `<span class="pa">${esc(ans)}</span></div>`;
       }
-      const ans = sec.kind === 'choice' && typeof it.answer === 'number'
-        ? `答案 ${marks[it.answer - 1] || it.answer}`
-        : (it.answer ? `答案 ${esc(it.answer)}` : '答案 —');
-      return `<div class="paper-item ${ok === false ? 'bad' : ''}">
-        <span>${i + 1}.</span><span class="pq">${txt}</span>
-        ${ok === false ? '<span class="pmark">错</span>' : ''}
-        <span class="pa">${ans}</span>
-      </div>`;
+      if (sec.kind === 'choice') {
+        const opts = (it.options || []).map((o, j) =>
+          `${marks[j] || j + 1}${esc(o)}`).join(' ');
+        const want = typeof it.answer === 'number'
+          ? `(${marks[it.answer - 1] || it.answer})` : '';
+        return `<div class="paper-line${bad}">${star}<span class="pno">${i + 1}.</span>`
+          + `<span class="pq">${esc(it.prompt)}</span>`
+          + `<span class="popt">${opts}</span>`
+          + `${bad ? '<span class="pmark">✗</span>' : ''}`
+          + `<span class="pa">${want}</span></div>`;
+      }
+      return `<div class="paper-line${bad}">${star}<span class="pno">${i + 1}.</span>`
+        + `<span class="pq">${esc(it.prompt)}</span>`
+        + `${bad ? '<span class="pmark">✗</span>' : ''}`
+        + `<span class="pa">${esc(it.answer || '—')}</span></div>`;
     }).join('');
-    return `<div class="paper-sec"><h3>${sec.no}、${esc(sec.title)}</h3>${items}</div>`;
+    const cls = sec.kind === 'fill' ? 'paper-fill' : 'paper-rows';
+    return `<div class="paper-sec"><h3>${sec.no}、${esc(sec.title)}</h3>`
+      + `<div class="${cls}">${items}</div></div>`;
   }).join('');
 
   $('mtBody').innerHTML = html + `
     <div class="mt-judge" style="margin:16px 0 30px">
+      <button class="no" id="paperFav">收藏夹</button>
       <button class="no" id="paperBack">返回列表</button>
       <button class="yes" id="paperRedo">重做这一课</button>
     </div>`;
   hideNext();
+  $('mtBody').querySelectorAll('.pstar').forEach((el) => {
+    el.onclick = () => {
+      toggleFav(el.dataset.qid);
+      el.textContent = isFav(el.dataset.qid) ? '★' : '☆';
+      el.classList.toggle('on', isFav(el.dataset.qid));
+    };
+  });
   $('paperBack').onclick = () => { renderList(); hooks.showView('minna'); };
+  $('paperFav').onclick = () => { renderFav(); hooks.showView('minnaFav'); };
   $('paperRedo').onclick = () => {
     if (!confirm('清空这一课的作答记录，重新开始？')) return;
     delete allProgress()[M.lesson];

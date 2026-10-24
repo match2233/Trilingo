@@ -678,13 +678,16 @@ function renderPaper(justFinished) {
           `${marks[j] || j + 1}${esc(o)}`).join(' ');
         const want = typeof it.answer === 'number'
           ? `(${marks[it.answer - 1] || it.answer})` : '';
-        return `<div class="paper-line${bad}">${star}<span class="pno">${i + 1}.</span>`
+        return `<div class="paper-line choice${bad}">${star}`
+          + `<span class="pno">${i + 1}.</span>`
           + `<span class="pq">${esc(it.prompt)}</span>`
           + `<span class="pa">${bad ? '✗ ' : ''}${want}</span>`
           + `<span class="popt">${opts}</span></div>`;
       }
-      return `<div class="paper-line${bad}">${star}<span class="pno">${i + 1}.</span>`
-        + `<span class="pq">${esc(it.prompt)}</span>`
+      // 翻译: 题干一行, 译文单独一行
+      return `<div class="paper-line trans${bad}">`
+        + `<div class="thead">${star}<span class="pno">${i + 1}.</span>`
+        + `<span class="pq">${esc(it.prompt)}</span></div>`
         + `<span class="pa">${bad ? '✗ ' : ''}${esc(it.answer || '—')}</span></div>`;
     }).join('');
     const cls = sec.kind === 'fill' ? 'paper-fill' : 'paper-rows';

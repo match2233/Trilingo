@@ -356,21 +356,28 @@ input.bad { border-color: var(--error); background: var(--error-soft); }
 .paper-cell .pa { color: #4a6cf7; font-weight: 700; }
 .paper-cell.bad, .paper-cell.bad .pq, .paper-cell.bad .pa { color: #d64545; }
 
-/* 选择题/翻译: 网格排版。题干占满剩余宽度, 选项单独一行铺满,
-   否则选项列会被挤成一字宽、竖着排下来。 */
-.paper-line { display: grid; grid-template-columns: auto auto 1fr auto;
-  column-gap: 6px; row-gap: 2px; align-items: baseline;
-  padding: 6px 6px; background: transparent; border-radius: 8px;
+/* 选择题/翻译。
+   选择题用 grid: 题干列 minmax(0,1fr) 才会"先收缩再换行",
+   用 flex 的话长题干会整块被挤到下一行。正确项是短序号, 放最后一列。
+   翻译用块级: 题干一行, 译文一行 —— 译文太长, 跟题干挤会把题干压成一字宽。 */
+.paper-line { padding: 6px 6px; background: transparent; border-radius: 8px;
   margin-bottom: 2px; font-size: 13px; line-height: 1.5; }
-.paper-line .pstar { grid-row: 1; }
 .paper-line .pno { color: var(--muted); font-size: 12px; }
-.paper-line .pq { font-weight: 700; word-break: break-word; }
-.paper-line .popt { grid-column: 1 / -1; color: var(--muted);
-  font-size: 12px; word-break: break-word; }
-.paper-line .pa { color: #4a6cf7; font-weight: 700; white-space: nowrap;
-  justify-self: end; }
+.paper-line .pq { font-weight: 700; min-width: 0; word-break: break-word; }
+.paper-line .pa { color: #4a6cf7; font-weight: 700; }
 .paper-line.bad, .paper-line.bad .pq, .paper-line.bad .pa { color: #d64545; }
-.paper-line .pmark { color: #d64545; font-weight: 700; }
+
+.paper-line.choice { display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  column-gap: 6px; row-gap: 2px; align-items: baseline; }
+.paper-line.choice .pa { white-space: nowrap; }
+.paper-line.choice .popt { grid-column: 1 / -1; color: var(--muted);
+  font-size: 12px; word-break: break-word; }
+
+.paper-line.trans { display: block; }
+.paper-line.trans .thead { display: flex; column-gap: 6px; align-items: baseline; }
+.paper-line.trans .thead .pq { flex: 1 1 auto; }
+.paper-line.trans .pa { display: block; margin-top: 3px; word-break: break-word; }
 
 .pstar { cursor: pointer; color: var(--muted); font-size: 15px; line-height: 1; }
 .pstar.on { color: #e8622c; }

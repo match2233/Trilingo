@@ -25,14 +25,17 @@ class FlatButton(tk.Frame):
         anchor="center",
         width=None,
         subtitle=None,
+        border=theme.BORDER_STRONG,
         **kw,
     ):
-        super().__init__(master, bg=bg, highlightthickness=1, highlightbackground=theme.BORDER, **kw)
+        super().__init__(master, bg=bg, highlightthickness=1,
+                         highlightbackground=border, **kw)
         self._bg = bg
         self._hover = hover
         self._active = active_bg or hover
         self._command = command
         self._enabled = True
+        self._border = border
 
         self._subtitle_font = theme.f(9)
         self._subtitle_pad = (padx, pady, anchor)
@@ -65,11 +68,61 @@ class FlatButton(tk.Frame):
                 pass
 
     # ---------------------------------------------------------------- 状态
+    def bind_hover_group(self, *widgets) -> None:
+        """把悬停/按下反馈扩展到同一张卡片里的其它控件.
+
+        FlatButton 本身只覆盖"标题+副标题"那一条, 外面若还包着卡片和图标,
+        鼠标移到那些地方就没有任何反馈 —— 看起来像只有文字能点。
+        调用它把这些控件也纳入同一次高亮, 整块方框一起变色。
+        """
+        targets = [w for w in widgets if w is not None]
+        self._hover_group = list(targets)
+        # 卡片本身也留着 1px 描边, 一起染色才不会露出一圈浅色细线
+        for w in targets:
+            if isinstance(w, Card):
+                self._hover_group.append(w)
+                break
+        for w in targets:
+            w.bind("<Enter>", self._on_enter)
+            w.bind("<Leave>", self._on_leave)
+            w.bind("<Button-1>", self._on_press)
+            w.bind("<ButtonRelease-1>", self._on_release)
+            try:
+                w.configure(cursor="hand2")
+            except tk.TclError:
+                pass
+
     def _paint(self, bg):
         self.configure(bg=bg)
         self._label.configure(bg=bg)
         if self._subtitle:
             self._subtitle.configure(bg=bg)
+        self._paint_border()
+        for w in getattr(self, "_hover_group", ()):
+            try:
+                w.configure(bg=bg)
+            except tk.TclError:
+                continue
+            # Card 是外圈容器, 它的描边要一直留着, 否则卡片就没有轮廓了;
+            # 其余子控件(都是纯装饰的 Label/Frame)描边跟随底色
+            if not isinstance(w, Card):
+                self._paint_border(w)
+
+    def _paint_border(self, widget=None) -> None:
+        """描边跟随底色.
+
+        卡片式按钮(底色=白)用自己的边框色, 这样按钮有清晰的轮廓;
+        其它底色(悬停态/实心按钮)直接用底色, 免得出现一圈套色。
+        """
+        w = widget if widget is not None else self
+        try:
+            bg = w.cget("bg")
+            if bg == theme.CARD:
+                w.configure(highlightbackground=getattr(self, "_border", theme.BORDER_STRONG))
+            else:
+                w.configure(highlightbackground=bg)
+        except tk.TclError:
+            pass
 
     def _on_enter(self, _=None):
         if self._enabled:
@@ -136,6 +189,15 @@ class FlatButton(tk.Frame):
         except tk.TclError:
             pass
 
+    def set_palette(self, bg: str, *, fg: str | None = None) -> None:
+        """同时换底色与文字色 (用于"选中态"这类需要整体换色的按钮)."""
+        self._bg = bg
+        self._hover = bg
+        self._active = bg
+        if fg is not None:
+            self._label.configure(fg=fg)
+        self._paint(bg)
+
 
 class Card(tk.Frame):
     """白底卡片容器."""
@@ -143,8 +205,95 @@ class Card(tk.Frame):
     def __init__(self, master, **kw):
         kw.setdefault("bg", theme.CARD)
         kw.setdefault("highlightthickness", 1)
-        kw.setdefault("highlightbackground", theme.BORDER)
+        kw.setdefault("highlightbackground", theme.BORDER_STRONG)
         super().__init__(master, **kw)
+
+
+class ScrollFrame(tk.Frame):
+    """带竖向滚动条的容器, 内容放进 self.body.
+
+    窗口变小时靠它兜住长内容 (24 课列表、整张试卷), 不会把布局撑破。
+    """
+
+    def __init__(self, master, bg=theme.BG, **kw):
+        super().__init__(master, bg=bg, **kw)
+        self.canvas = tk.Canvas(self, bg=bg, highlightthickness=0)
+        self.vs = tk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.vs.set)
+        self.vs.pack(side="right", fill="y")
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.body = tk.Frame(self.canvas, bg=bg)
+        self._win = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
+        self.body.bind("<Configure>", self._on_inner)
+        self.canvas.bind("<Configure>", self._on_canvas)
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.canvas.bind_all(seq, self._on_wheel, add="+")
+
+    def _on_inner(self, _=None) -> None:
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_canvas(self, event) -> None:
+        self.canvas.itemconfigure(self._win, width=event.width)
+
+    def _on_wheel(self, event) -> None:
+        """滚轮只在指针位于本控件上时生效, 免得抢别的页面的滚动."""
+        if not self.winfo_ismapped():
+            return
+        try:
+            w = self.winfo_containing(event.x_root, event.y_root)
+        except Exception:          # noqa: BLE001
+            return
+        inside = False
+        while w is not None:
+            if w is self:
+                inside = True
+                break
+            w = getattr(w, "master", None)
+        if not inside:
+            return
+        if getattr(event, "num", None) == 4:
+            delta = -1
+        elif getattr(event, "num", None) == 5:
+            delta = 1
+        else:
+            delta = -1 if getattr(event, "delta", 0) > 0 else 1
+        self.canvas.yview_scroll(delta * 3, "units")
+
+    def scroll_to_top(self) -> None:
+        self.canvas.yview_moveto(0)
+
+
+class ProgressBar(tk.Canvas):
+    """细长进度条 (纯展示, 不接收事件)."""
+
+    def __init__(self, master, *, width=150, height=8, color=theme.PRIMARY,
+                 bg=theme.CARD):
+        super().__init__(master, width=width, height=height, bg=bg,
+                         highlightthickness=0)
+        # 注意: 不能叫 self._w —— 那是 tkinter 内部的控件路径名
+        self._bw, self._bh, self._color, self._bg = width, height, color, bg
+        self._ratio = 0.0
+        self._paint()
+
+    def set(self, ratio: float, color: str | None = None) -> None:
+        self._ratio = max(0.0, min(1.0, ratio))
+        if color:
+            self._color = color
+        self._paint()
+
+    def set_bg(self, bg: str) -> None:
+        self._bg = bg
+        self.configure(bg=bg)
+        self._paint()
+
+    def _paint(self) -> None:
+        self.delete("all")
+        self.create_rectangle(0, 0, self._bw, self._bh,
+                              fill=theme.BORDER, outline=theme.BORDER)
+        done = self._bw * self._ratio
+        if done > 0:
+            self.create_rectangle(0, 0, max(done, self._bh), self._bh,
+                                  fill=self._color, outline=self._color)
 
 
 class Stat(tk.Frame):

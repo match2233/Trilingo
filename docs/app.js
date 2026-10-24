@@ -4,6 +4,8 @@
 
 import * as C from './core.js';
 import * as gh from './gh.js';
+import * as Minna from './minna.js';
+import * as Life from './life.js';
 
 const CORRECT_DELAY = 2500;   // 答对后停留多久再跳下一题（毫秒）
 
@@ -260,7 +262,9 @@ function renderHome() {
     ? '词表里还没有内容'
     : (planDone >= planTotal ? '今天的任务已全部完成 🎉' : `还剩 ${planTotal - planDone} 个词`);
 
-  // 错题本入口
+  // 错题本入口 (英语/日语合并成一个)
+  let openTotal = 0;
+  let dueTotal = 0;
   for (const lang of ['en', 'jp']) {
     const open = Object.entries(der.mistakes)
       .filter(([k, m]) => k.startsWith(lang + ':') && !m.g);
@@ -268,11 +272,42 @@ function renderHome() {
       const d = C.nextDue(m);
       return d && d <= t;
     }).length;
-    const el = $(lang === 'en' ? 'tileErrEn' : 'tileErrJp');
-    el.querySelector('[data-foot]').textContent = open.length
-      ? (due ? `${open.length} 个 · 今日待复习 ${due}` : `${open.length} 个待复习`)
-      : '暂无错词';
+    openTotal += open.length;
+    dueTotal += due;
   }
+  const errEl = $('tileErr');
+  errEl.querySelector('[data-foot]').textContent = openTotal === 0
+    ? '暂无错词'
+    : (dueTotal ? `${openTotal} 个 · 今日待复习 ${dueTotal}` : `${openTotal} 个待复习`);
+
+  // 新标日测试 (minna.js 万一没加载成功, 也不能拖垮首页)
+  let mDone = 0;
+  let mDoing = 0;
+  let mTotal = 0;
+  try {
+    if (typeof Minna !== 'undefined' && Minna) {
+      const mp = Minna.progressMap();
+      mDone = Object.values(mp).filter((p) => p && p.status === 'done').length;
+      mDoing = Object.values(mp).filter((p) => p && p.status === 'doing').length;
+      mTotal = Minna.bankLessons().length;
+    }
+  } catch (e) { /* 忽略 */ }
+  $('tileMinna').querySelector('[data-foot]').textContent = mDone
+    ? `已完成 ${mDone}/${mTotal} 课`
+    : (mDoing ? `有 ${mDoing} 课未做完` : (mTotal ? `共 ${mTotal} 课 · 未开始` : '题库未加载'));
+
+  // 生活记录
+  let lf = '';
+  let df = '';
+  try {
+    if (typeof Life !== 'undefined' && Life) {
+      lf = Life.ledgerFooter();
+      df = Life.deerFooter();
+    }
+  } catch (e) { /* 忽略 */ }
+  const parts2 = [df, lf].filter(Boolean);
+  $('tileLife').querySelector('[data-foot]').textContent = parts2.length
+    ? parts2.join(' · ') : '记账 · 记鹿';
 
   // 累计数据
   $('statWords').textContent = words('en').length + words('jp').length;
@@ -426,7 +461,9 @@ function showView(name) {
   document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
   const el = $(name);
   if (el) el.classList.add('active');
-  $('tabs').style.display = name === 'quiz' ? 'none' : 'flex';
+  const full = name === 'quiz' || name === 'minnaTest';
+  $('tabs').style.display = full ? 'none' : 'flex';
+  document.body.classList.toggle('mt-mode', name === 'minnaTest');
   document.querySelectorAll('#tabs button').forEach((b) =>
     b.classList.toggle('on', b.dataset.view === name));
   window.scrollTo(0, 0);
@@ -454,8 +491,30 @@ function toast(msg) {
 function bind() {
   $('tileEn').onclick = () => startQuiz('en');
   $('tileJp').onclick = () => startQuiz('jp');
-  $('tileErrEn').onclick = () => { S.lang = 'en'; renderMistakes(); showView('mistakes'); };
-  $('tileErrJp').onclick = () => { S.lang = 'jp'; renderMistakes(); showView('mistakes'); };
+  $('tileErr').onclick = () => { renderMistakes(); showView('mistakes'); };
+  $('tileMinna').onclick = () => {
+    if (typeof Minna === 'undefined' || !Minna) { toast('题库模块未加载'); return; }
+    Minna.renderList();
+    showView('minna');
+  };
+  $('tileSentence').onclick = () => showView('sentence');
+  $('tileLife').onclick = () => showView('life');
+  $('tileLedger').onclick = () => {
+    if (typeof Life === 'undefined' || !Life) { toast('生活记录模块未加载'); return; }
+    Life.renderLedger();
+    showView('ledger');
+  };
+  $('tileDeer').onclick = () => {
+    if (typeof Life === 'undefined' || !Life) { toast('生活记录模块未加载'); return; }
+    Life.renderDeer();
+    showView('deer');
+  };
+  $('ledgerBack').onclick = () => showView('life');
+  $('deerBack').onclick = () => showView('life');
+  $('lifeBack').onclick = () => showView('home');
+  $('sentBack').onclick = () => showView('home');
+  $('minnaBack').onclick = () => { Minna.renderList(); showView('home'); };
+  $('mtBack').onclick = () => Minna.leave();
 
   document.querySelectorAll('#tabs button').forEach((b) => {
     b.onclick = () => { showView(b.dataset.view); renderAll(); };
@@ -508,6 +567,14 @@ function bind() {
 
 async function init() {
   bind();
+  // 这三个模块是"附加功能", 任何一个没加载成功都不该影响背单词主流程
+  try { if (typeof Life !== 'undefined' && Life) Life.initLife({ toast }); } catch (e) { /* */ }
+  try {
+    if (typeof Minna !== 'undefined' && Minna) {
+      Minna.initMinna({ showView, toast });
+      await Minna.loadBank();
+    }
+  } catch (e) { /* */ }
   refreshDerived();
   renderAll();
   showView('home');

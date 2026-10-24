@@ -15,8 +15,10 @@ class TrilingoApp(tk.Tk):
         super().__init__()
         self.db = db
         self.title(f"{C.APP_NAME} — 背单词")
-        center_window(self, 1000, 700)
-        self.minsize(880, 620)
+        # 高分屏下按真实 DPI 放大窗口, 字体才不会挤在一起
+        self.scale = max(1.0, self.winfo_fpixels("1i") / 96.0)
+        center_window(self, int(1040 * self.scale), int(720 * self.scale))
+        self.minsize(int(880 * self.scale), int(620 * self.scale))
         self.configure(bg=theme.BG)
         self._set_icon()
 
@@ -61,18 +63,38 @@ class TrilingoApp(tk.Tk):
             from .quiz import QuizFrame
 
             return QuizFrame(self.container, self, "jp")
-        if name == "mistakes_en":
+        if name == "mistakes":
             from .mistakes import MistakeFrame
 
-            return MistakeFrame(self.container, self, "en")
-        if name == "mistakes_jp":
-            from .mistakes import MistakeFrame
-
-            return MistakeFrame(self.container, self, "jp")
+            return MistakeFrame(self.container, self)
         if name == "database":
             from .database import DatabaseFrame
 
             return DatabaseFrame(self.container, self)
+        if name == "life":
+            from .life import LifeFrame
+
+            return LifeFrame(self.container, self)
+        if name == "ledger":
+            from .ledger import LedgerFrame
+
+            return LedgerFrame(self.container, self)
+        if name == "deer":
+            from .deer import DeerFrame
+
+            return DeerFrame(self.container, self)
+        if name == "minna":
+            from .minna import MinnaListFrame
+
+            return MinnaListFrame(self.container, self)
+        if name == "minna_test":
+            from .minna_test import MinnaTestFrame
+
+            return MinnaTestFrame(self.container, self)
+        if name == "sentence":
+            from .sentence import SentenceFrame
+
+            return SentenceFrame(self.container, self)
         raise KeyError(name)
 
     def refresh_menu(self) -> None:
@@ -171,7 +193,10 @@ class TrilingoApp(tk.Tk):
 
 
 class MenuFrame(tk.Frame):
-    """主界面: 两行两列四个按钮 + 右上角连续打卡 + 底部数据库按钮."""
+    """主界面: 两行两列四个等宽等高大按钮 + 右上角连续打卡 + 底部数据库/同步.
+
+    四个大按钮: 左上英语词汇 / 右上日语词汇 / 左下错题本 / 右下生活记录。
+    """
 
     def __init__(self, master, app: TrilingoApp):
         super().__init__(master, bg=theme.BG)
@@ -204,28 +229,37 @@ class MenuFrame(tk.Frame):
                                      font=theme.f(17, "bold"))
         self.streak_label.pack(anchor="w")
 
-        # ---------------- 四个主按钮
+        # ---------------- 两行三列六个入口
         grid = tk.Frame(self, bg=theme.BG)
         grid.pack(fill="both", expand=True, padx=34, pady=(16, 8))
-        grid.grid_rowconfigure(0, weight=1)
-        grid.grid_rowconfigure(1, weight=1)
-        grid.grid_columnconfigure(0, weight=1)
-        grid.grid_columnconfigure(1, weight=1)
+        for r in (0, 1):
+            grid.grid_rowconfigure(r, weight=1, uniform="mrow")
+        for c in range(3):
+            grid.grid_columnconfigure(c, weight=1, uniform="mcol")
 
+        # 第一行: 英语词汇 / 日语词汇 / 错题本
         self.btn_en = self._quad(grid, 0, 0, "英语词汇", "从《词汇英.xlsx》每日抽取",
                                  theme.PRIMARY, theme.PRIMARY_SOFT,
                                  lambda: self.app.show("quiz_en"))
-        self.btn_err_en = self._quad(grid, 0, 1, "错题本（英）", "英语错词与复习计划",
-                                     theme.BLUE, theme.BLUE_SOFT,
-                                     lambda: self.app.show("mistakes_en"))
-        self.btn_jp = self._quad(grid, 1, 0, "日语词汇", "从《词汇日.xlsx》每日抽取",
+        self.btn_jp = self._quad(grid, 0, 1, "日语词汇", "从《词汇日.xlsx》每日抽取",
                                  theme.PRIMARY, theme.PRIMARY_SOFT,
                                  lambda: self.app.show("quiz_jp"))
-        self.btn_err_jp = self._quad(grid, 1, 1, "错题本（日）", "日语错词与复习计划",
-                                     theme.BLUE, theme.BLUE_SOFT,
-                                     lambda: self.app.show("mistakes_jp"))
+        self.btn_err = self._quad(grid, 0, 2, "错题本", "英语 · 日语错词与复习",
+                                  theme.BLUE, theme.BLUE_SOFT,
+                                  lambda: self.app.show("mistakes"))
 
-        # ---------------- 底部
+        # 第二行: 新标日测试 / 句子练习 / 生活记录
+        self.btn_minna = self._quad(grid, 1, 0, "新标日测试", "24 课同步测试卷",
+                                    theme.PRIMARY_DARK, theme.PRIMARY_SOFT,
+                                    lambda: self.app.show("minna"))
+        self.btn_sentence = self._quad(grid, 1, 1, "句子练习", "开发中",
+                                       theme.MUTED, theme.BG,
+                                       lambda: self.app.show("sentence"))
+        self.life_btn = self._quad(grid, 1, 2, "生活记录", "记账 · 记鹿",
+                                   theme.SUCCESS, theme.SUCCESS_SOFT,
+                                   lambda: self.app.show("life"))
+
+        # ---------------- 底部: 数据库 + 同步 (保持原样)
         bottom = tk.Frame(self, bg=theme.BG)
         bottom.pack(fill="x", padx=34, pady=(4, 22))
         self.notice = tk.Label(bottom, text="", bg=theme.BG, fg=theme.MUTED, font=theme.f(9))
@@ -250,42 +284,53 @@ class MenuFrame(tk.Frame):
 
     def _quad(self, parent, r, c, title, sub, color, soft, cmd) -> FlatButton:
         card = Card(parent)
-        card.grid(row=r, column=c, sticky="nsew", padx=8, pady=8)
+        card.grid(row=r, column=c, sticky="nsew", padx=7, pady=7)
         btn = FlatButton(
             card, title, cmd, bg=theme.CARD, hover=soft, active_bg=soft,
-            font=theme.f(21, "bold"), fg=color, pady=30,
+            font=theme.f(21, "bold"), fg=color, pady=12,
         )
         btn.pack(fill="both", expand=True, padx=2, pady=2)
         btn.set_subtitle(sub)
-        btn.configure(highlightbackground=theme.BORDER)
         return btn
 
     # ------------------------------------------------------------ 刷新
     def on_show(self, **_):
         self.streak_label.configure(text=f"{self.app.db.streak()} 天")
 
-        for lang, btn, label in (
-            ("en", self.btn_en, "英语词汇"),
-            ("jp", self.btn_jp, "日语词汇"),
-        ):
+        for lang, btn in (("en", self.btn_en), ("jp", self.btn_jp)):
             answered, total = self.app.db.today_status(lang)
             if total:
                 btn.set_subtitle(f"今日进度 {answered}/{total}")
             else:
-                btn.set_subtitle(f"每日 {C.EN_DAILY_NEW if lang=='en' else C.JP_DAILY_NEW} 个新词")
+                btn.set_subtitle(
+                    f"每日 {C.EN_DAILY_NEW if lang == 'en' else C.JP_DAILY_NEW} 个新词")
 
-        for lang, btn, label in (
-            ("en", self.btn_err_en, "错题本（英）"),
-            ("jp", self.btn_err_jp, "错题本（日）"),
-        ):
-            n = len(self.app.db.open_mistakes(lang))
-            due = len(self.app.db.due_mistakes(lang))
-            if n == 0:
-                btn.set_subtitle("暂无错题")
-            elif due:
-                btn.set_subtitle(f"{n} 个错词 · 今日待复习 {due}")
-            else:
-                btn.set_subtitle(f"{n} 个错词")
+        # 错题本合并成一个入口, 副标题同时给出两门语言的错词数
+        en_n, jp_n = (len(self.app.db.open_mistakes(x)) for x in ("en", "jp"))
+        due = len(self.app.db.due_mistakes("en")) + len(self.app.db.due_mistakes("jp"))
+        if en_n + jp_n == 0:
+            self.btn_err.set_subtitle("暂无错题")
+        elif due:
+            self.btn_err.set_subtitle(f"英 {en_n} · 日 {jp_n} · 今日待复习 {due}")
+        else:
+            self.btn_err.set_subtitle(f"英 {en_n} · 日 {jp_n}")
+
+        # 新标日测试: 完成了几课 / 平均分
+        from .. import minna
+
+        prog = self.app.db.minna_all_progress()
+        done = [p for p in prog.values() if p["status"] == "done"]
+        doing = [p for p in prog.values() if p["status"] == "doing"]
+        total_les = len(minna.lessons())
+        if done:
+            score = sum(p["score"] for p in done)
+            tot = sum(p["total"] for p in done) or 1
+            self.btn_minna.set_subtitle(
+                f"已完成 {len(done)}/{total_les} 课 · 正确率 {score * 100 // tot}%")
+        elif doing:
+            self.btn_minna.set_subtitle(f"有 {len(doing)} 课未做完")
+        else:
+            self.btn_minna.set_subtitle(f"共 {total_les} 课 · 未开始")
 
         # 同步状态 + 补全结果, 都显示（同步那条不含统计数字）
         parts = [t for t in (self.app._sync_notice, self.app._enrich_notice) if t]
@@ -298,6 +343,30 @@ class MenuFrame(tk.Frame):
         else:
             self.sync_btn.set_subtitle("已开启" if ghsync.is_configured() else "未设置")
 
+        # 数据库: 词条总数 + 已学多少条
         db = self.app.db
-        total = len(db.en_words()) + len(db.jp_words())
-        self.db_btn.set_subtitle(f"{total} 个词条")
+        en_done, en_all = db.studied_count("en")
+        jp_done, jp_all = db.studied_count("jp")
+        total, done = en_all + jp_all, en_done + jp_done
+        self.db_btn.set_subtitle(f"{total} 个词条 · 已学 {done} 个")
+
+        # 生活记录: 有记录才给数字, 免得平时干扰
+        month = db.deer_month(*_this_month())
+        parts = []
+        if sum(month.values()):
+            parts.append(f"本月 {sum(month.values())} 次")
+        from .. import config as _C
+
+        for cur in _C.CURRENCIES:
+            t = db.ledger_totals(cur)
+            if t["income"] or t["expense"]:
+                sign = _C.CURRENCY_SIGN[cur]
+                parts.append(f"{sign}{_C.fmt_money(t['balance'], cur)}")
+                break
+        self.life_btn.set_subtitle("　·　".join(parts) if parts else "记账 · 记鹿")
+
+def _this_month() -> tuple[int, int]:
+    import datetime as dt
+
+    t = dt.date.today()
+    return t.year, t.month

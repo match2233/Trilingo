@@ -112,6 +112,48 @@ CORRECT_DELAY_MS = 5000   # 拼写正确后停留 5 秒自动进入下一词
 # 错题复习: day0 出错后必然出现在 day+1, +3, +7, +15, +30
 REVIEW_OFFSETS = (1, 3, 7, 15, 30)
 
+# ---------------------------------------------------------------- 生活记录
+# 账本按币种分开记, 互不换算 (没有汇率来源, 换算只会引入假精度)。
+CURRENCIES = ("CNY", "JPY", "USD")
+CURRENCY_NAME = {"CNY": "人民币", "JPY": "日元", "USD": "美元"}
+CURRENCY_SIGN = {"CNY": "¥", "JPY": "¥", "USD": "$"}
+
+# 记鹿: 0/1/2/3 四档, 各自一个固定颜色, 月历按这个上色
+DEER_LEVELS = (0, 1, 2, 3)
+DEER_COLOR = {0: "#FFFFFF", 1: "#F5D547", 2: "#F0902B", 3: "#D64545"}
+DEER_TEXT_COLOR = {0: "#7A8194", 1: "#7A6A12", 2: "#7A4712", 3: "#FFFFFF"}
+DEER_LABEL = {0: "白", 1: "黄", 2: "橙", 3: "红"}
+
+
+def fmt_money(cents: int, currency: str) -> str:
+    """把整数分格式化成两位小数的金额 (不带符号)."""
+    return f"{cents / 100:,.2f}"
+
+
+def parse_money(text: str) -> int | None:
+    """把用户输入解析成整数分; 非法或超过两位小数返回 None."""
+    s = (text or "").strip().replace(",", "").replace("，", "")
+    if not s:
+        return None
+    if s.count(".") > 1:
+        return None
+    body = s[1:] if s[:1] in "+-" else s
+    if not body:
+        return None
+    if "." in body:
+        int_part, _, frac = body.partition(".")
+        if not int_part.isdigit() or len(frac) > 2 or (frac and not frac.isdigit()):
+            return None
+    elif not body.isdigit():
+        return None
+    try:
+        val = float(s)
+    except ValueError:
+        return None
+    if val < 0:
+        return None
+    return int(round(val * 100))
+
 # ---------------------------------------------------------------- 字体
 def ui_font_family() -> str:
     if sys.platform == "win32":

@@ -48,16 +48,11 @@
       </div>
     </div>
 
-    <!-- 四个入口 -->
+    <!-- 六个入口: 英语词汇 / 日语词汇 / 错题本 / 新标日测试 / 句子练习 / 生活记录 -->
     <div class="grid2">
       <button class="tile" id="tileEn">
         <span class="tile-tag">英语</span>
         <span class="tile-main">词汇</span>
-        <span class="tile-foot" data-foot></span>
-      </button>
-      <button class="tile" id="tileErrEn">
-        <span class="tile-tag blue">英语</span>
-        <span class="tile-main">错题本</span>
         <span class="tile-foot" data-foot></span>
       </button>
       <button class="tile" id="tileJp">
@@ -65,9 +60,24 @@
         <span class="tile-main">词汇</span>
         <span class="tile-foot" data-foot></span>
       </button>
-      <button class="tile" id="tileErrJp">
-        <span class="tile-tag blue">日语</span>
+      <button class="tile" id="tileErr">
+        <span class="tile-tag blue">错题</span>
         <span class="tile-main">错题本</span>
+        <span class="tile-foot" data-foot></span>
+      </button>
+      <button class="tile" id="tileMinna">
+        <span class="tile-tag orange">新标日</span>
+        <span class="tile-main">测试卷</span>
+        <span class="tile-foot" data-foot></span>
+      </button>
+      <button class="tile" id="tileSentence">
+        <span class="tile-tag gray">句子</span>
+        <span class="tile-main">练习</span>
+        <span class="tile-foot" data-foot></span>
+      </button>
+      <button class="tile" id="tileLife">
+        <span class="tile-tag green">生活</span>
+        <span class="tile-main">记录</span>
         <span class="tile-foot" data-foot></span>
       </button>
     </div>
@@ -114,6 +124,118 @@
       <div class="done-stats" id="doneStats"></div>
       <button class="primary" id="doneBack">返回首页</button>
     </div>
+  </section>
+
+  <!-- ============================== 新标日测试 ============================== -->
+  <section id="minna" class="view">
+    <div class="quiz-head">
+      <button class="ghost" id="minnaBack">‹ 返回</button>
+      <span class="title">新标日测试</span>
+    </div>
+    <p class="sub" id="minnaSummary"></p>
+    <div class="minna-head">
+      <span>课</span><span>完成进度</span><span>成绩</span><span>完成时间</span>
+    </div>
+    <div class="list" id="minnaList"></div>
+  </section>
+
+  <!-- ============================== 答题页 ============================== -->
+  <section id="minnaTest" class="view">
+    <div class="quiz-head">
+      <button class="ghost" id="mtBack">‹ 返回</button>
+      <span class="title" id="mtTitle"></span>
+      <span class="mt-timer" id="mtTimer">00:00</span>
+    </div>
+    <div class="bar"><i id="mtBar"></i></div>
+    <p class="sub" id="mtSub"></p>
+    <div id="mtBody" class="mt-body"></div>
+    <div class="mt-foot">
+      <span id="mtHint" class="sub"></span>
+      <button class="primary" id="mtNext" style="display:none">下一题</button>
+    </div>
+  </section>
+
+  <!-- ============================== 句子练习 ============================== -->
+  <section id="sentence" class="view">
+    <div class="quiz-head">
+      <button class="ghost" id="sentBack">‹ 返回</button>
+      <span class="title">句子练习</span>
+    </div>
+    <div class="placeholder">
+      <div class="ph-icon">🚧</div>
+      <div class="ph-title">句子练习还在开发中</div>
+      <p class="sub">这部分先留个入口，后续版本再加。</p>
+    </div>
+  </section>
+
+  <!-- ============================== 生活记录 ============================== -->
+  <section id="life" class="view">
+    <div class="quiz-head">
+      <button class="ghost" id="lifeBack">‹ 返回</button>
+      <span class="title">生活记录</span>
+    </div>
+    <p class="sub">仅保存在本机，不参与跨设备同步</p>
+    <div class="grid2">
+      <button class="tile" id="tileLedger">
+        <span class="tile-tag orange">记账</span>
+        <span class="tile-main">记账</span>
+        <span class="tile-foot" data-foot>收入 · 支出 · 账单</span>
+      </button>
+      <button class="tile" id="tileDeer">
+        <span class="tile-tag green">记鹿</span>
+        <span class="tile-main">记鹿</span>
+        <span class="tile-foot" data-foot>每天记一次</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- 记账 -->
+  <section id="ledger" class="view">
+    <div class="quiz-head">
+      <button class="ghost" id="ledgerBack">‹ 返回</button>
+      <span class="title">记账</span>
+      <span class="mt-timer" id="lgBalance">¥0.00</span>
+    </div>
+    <div class="seg" id="curSeg">
+      <button data-cur="CNY" class="on">人民币</button>
+      <button data-cur="JPY">日元</button>
+      <button data-cur="USD">美元</button>
+    </div>
+
+    <div class="lg-card">
+      <div class="lg-row">
+        <span class="lg-kind income">收入</span>
+        <input type="text" id="incSrc" placeholder="收入来源">
+        <input type="number" id="incAmt" inputmode="decimal" step="0.01" min="0" placeholder="0.00">
+        <button class="lg-submit" id="incSubmit">提交</button>
+      </div>
+      <div class="lg-row">
+        <span class="lg-kind expense">支出</span>
+        <input type="text" id="expSrc" placeholder="支出方向">
+        <input type="number" id="expAmt" inputmode="decimal" step="0.01" min="0" placeholder="0.00">
+        <button class="lg-submit exp" id="expSubmit">提交</button>
+      </div>
+      <div class="lg-total">
+        <div><span class="sub">总余额</span><b id="lgTotal">¥0.00</b></div>
+        <div><span class="sub">总收入</span><b id="lgIncome">¥0.00</b></div>
+      </div>
+    </div>
+
+    <h2>账单明细</h2>
+    <div class="list" id="lgList"></div>
+  </section>
+
+  <!-- 记鹿 -->
+  <section id="deer" class="view">
+    <div class="quiz-head">
+      <button class="ghost" id="deerBack">‹ 返回</button>
+      <span class="title">记鹿</span>
+    </div>
+    <p class="sub" id="deerDay"></p>
+    <div class="deer-row" id="deerRow"></div>
+    <p class="sub" id="deerStat"></p>
+    <h2>本月</h2>
+    <div class="deer-cal" id="deerCal"></div>
   </section>
 
   <!-- ============================== 错题本 ============================== -->

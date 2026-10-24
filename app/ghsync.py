@@ -262,16 +262,36 @@ def apply_state_to_db(db, state: dict) -> None:
 
     # 再播事件: 跳过本机已应用的, 以及对方快照已覆盖的。
     #
-    # 「快照已覆盖」还要按**日期**再挡一层: base.done 里出现过的那几天, 其作答
-    # 效果已经并入 base.mistakes 了, 再播一遍就是重复计算 —— 表现是另一台设备
-    # 的档位和出错次数比电脑端偏高(实测 75 条里 72 条对不上)。
+    # 「快照已覆盖」光按**日期**判断会漏数据: base.done 记的是"那天答了几题",
+    # 但 base.mistakes 是更早冻结的一份错题表 —— 某个词可能是那天**新建**的,
+    # 快照里根本没有它。只看日期就会把这个词的事件一起丢掉, 表现是另一台设备
+    # 上少了这个词、或档位比这边低一档 (实测丢 3 个词、5 个词档位偏低)。
     #
-    # 只挡**今天之前**的日期: 今天的作答可能正好发生在拍快照之后, base 里没有
-    # 它们的效果, 挡掉就等于把对方今天的进度整段丢掉(实测会丢 4 条新错题)。
-    # 今天的重复由上面的 base.mistakes 补齐 + applied_events 一起兜住。
+    # 所以加一个条件: 只有**本机错题表里已经有这个词**时, 才认为那天的效果
+    # 已并入快照、可以跳过; 本机没有的词, 事件照样重播。
     folded_days = {d for d in (base.get("done") or {}) if d and d < _today()}
-    pending = [e for e in (state.get("events") or [])
-               if (e.get("day") or "") not in folded_days]
+    have = db.mistake_words()
+    stats = base.get("stats") or {}
+
+    def covered(e: dict) -> bool:
+        """这条事件的效果是否已经包含在 base.mistakes 里了.
+
+        两个条件同时成立才算覆盖:
+          1. 那一天的作答已经并进快照 (日期在 folded_days 里)
+          2. 本机错题表里已经有这个词 —— 否则快照里就没有它的效果
+        3. 事件的日期不晚于快照里该词的最后学习日 —— 之后发生的一次复习
+             并不在快照里, 必须重播, 否则另一台设备的档位会低一档
+        """
+        day = e.get("day") or ""
+        if day not in folded_days:
+            return False
+        key = (e.get("l", ""), e.get("w", ""))
+        if key not in have:
+            return False
+        last = stats.get(f"{key[0]}:{key[1]}") or ""
+        return bool(last) and day <= last
+
+    pending = [e for e in (state.get("events") or []) if not covered(e)]
     db.apply_remote_events(pending,
                            since_ts=int(base.get("folded_ts") or 0),
                            folded=base.get("folded") or {})

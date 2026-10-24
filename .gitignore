@@ -40,3 +40,9 @@ __pycache__/
 venv/
 env/
 .pytest_cache/
+
+# ── 题库: 由商业教辅 PDF 生成, 只放私有数据仓库, 不随公开仓库发布 ──
+# 生成方式: python tools/build_minna_tests.py <pdf路径>
+# 手机端会从 GitHub 私有数据仓库 (data/sync.json 里配置的那个) 按需拉取。
+data/minna_tests.json
+docs/minna_tests.json

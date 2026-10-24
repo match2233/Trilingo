@@ -118,6 +118,53 @@ CREATE TABLE IF NOT EXISTS dropped_words (
     at   INTEGER NOT NULL,
     PRIMARY KEY (lang, word)
 );
+
+-- ---------------------------------------------------------------- 生活记录
+-- 这两张表**只在电脑端本地使用, 不参与跨设备同步**:
+-- 它们不放进 events / base, state_from_db 也不会导出它们。
+-- 金额一律存整数"分", 避免浮点误差；显示时再除以 100。
+
+CREATE TABLE IF NOT EXISTS ledger (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    day        TEXT NOT NULL,
+    at         TEXT NOT NULL,          -- 提交时刻 ISO, 明细里显示到秒
+    kind       TEXT NOT NULL,          -- income / expense
+    source     TEXT NOT NULL DEFAULT '',
+    currency   TEXT NOT NULL,          -- CNY / JPY / USD
+    cents      INTEGER NOT NULL,       -- 金额(分), 恒为正
+    created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_ledger_day ON ledger(day, currency);
+
+CREATE TABLE IF NOT EXISTS deer (
+    day        TEXT PRIMARY KEY,       -- 一天一条
+    level      INTEGER NOT NULL,       -- 0..3
+    at         TEXT NOT NULL
+);
+
+-- ---------------------------------------------------------------- 新标日测试
+-- 题库本身是 data/minna_tests.json (桌面与 PWA 共用同一份), 这里只存进度。
+-- 进度**不参与跨设备同步**: 每台设备各记各的, 避免再动那套脆弱的事件同步。
+CREATE TABLE IF NOT EXISTS minna_progress (
+    lesson      INTEGER PRIMARY KEY,
+    status      TEXT NOT NULL DEFAULT 'idle',   -- idle / doing / done
+    section     INTEGER NOT NULL DEFAULT 0,     -- 当前在第几大题 (恢复用)
+    idx         INTEGER NOT NULL DEFAULT 0,     -- 该大题内第几小题
+    seconds     INTEGER NOT NULL DEFAULT 0,     -- 用时(秒)
+    score       INTEGER NOT NULL DEFAULT 0,     -- 答对数
+    total       INTEGER NOT NULL DEFAULT 0,     -- 总题数
+    started_at  TEXT,
+    finished_at TEXT,
+    updated_at  TEXT
+);
+
+-- 每道题的判定结果: 1 对 / 0 错。未答的题没有行。
+CREATE TABLE IF NOT EXISTS minna_result (
+    lesson  INTEGER NOT NULL,
+    qid     TEXT NOT NULL,            -- 题库里的稳定 id: L01-S1-3
+    ok      INTEGER NOT NULL,
+    PRIMARY KEY (lesson, qid)
+);
 """
 
 
@@ -822,6 +869,17 @@ class Database:
 
 
 
+    def mistake_words(self) -> set[tuple[str, str]]:
+        """本机错题本里已有的 (语言, 单词). 供同步判断事件要不要重播."""
+        out: set[tuple[str, str]] = set()
+        for lang, table in (("en", "en_words"), ("jp", "jp_words")):
+            for r in self.conn.execute(
+                f"SELECT w.word AS word FROM mistakes m JOIN {table} w"
+                " ON w.id = m.word_id WHERE m.lang=?", (lang,)
+            ):
+                out.add((lang, r["word"]))
+        return out
+
     def due_mistakes(self, lang: str, day: str | None = None) -> list[sqlite3.Row]:
         day = day or today()
         return self.conn.execute(
@@ -982,4 +1040,178 @@ class Database:
             "INSERT INTO meta (k,v) VALUES (?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v",
             (key, value),
         )
+        self.conn.commit()
+
+    # ------------------------------------------------------------ 学习概况
+    def studied_count(self, lang: str) -> tuple[int, int]:
+        """(已学词条数, 全部在用词条数).
+
+        已学 = 学习次数 > 0。这个计数由 _apply_event 就地维护, 与错题本同步,
+        不会因为网络或事件重播而漂移。
+        """
+        table = "en_words" if lang == "en" else "jp_words"
+        r = self.conn.execute(
+            f"SELECT COUNT(*) total, SUM(CASE WHEN times_studied>0 THEN 1 ELSE 0 END) done"
+            f" FROM {table} WHERE active=1"
+        ).fetchone()
+        return int(r["done"] or 0), int(r["total"] or 0)
+
+    # ------------------------------------------------------------ 生活记录
+    # 全部只写本机 SQLite, 不进 events / base, 因此天然不参与跨设备同步。
+
+    def ledger_add(self, kind: str, source: str, currency: str, cents: int,
+                   day: str | None = None) -> int:
+        """记一笔收支, 返回新记录 id. 同一天可以提交任意多次."""
+        now = dt.datetime.now()
+        cur = self.conn.execute(
+            "INSERT INTO ledger (day,at,kind,source,currency,cents,created_at)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (day or now.date().isoformat(), now.isoformat(timespec="seconds"),
+             kind, source, currency, int(cents), _now()),
+        )
+        self.conn.commit()
+        return int(cur.lastrowid or 0)
+
+    def ledger_del(self, entry_id: int) -> None:
+        self.conn.execute("DELETE FROM ledger WHERE id=?", (entry_id,))
+        self.conn.commit()
+
+    def ledger_all(self, currency: str) -> list[sqlite3.Row]:
+        return self.conn.execute(
+            "SELECT * FROM ledger WHERE currency=? ORDER BY at DESC, id DESC",
+            (currency,),
+        ).fetchall()
+
+    def ledger_totals(self, currency: str) -> dict:
+        """某币种的总收入 / 总支出 / 总余额."""
+        r = self.conn.execute(
+            "SELECT"
+            " COALESCE(SUM(CASE WHEN kind='income'  THEN cents END),0) inc,"
+            " COALESCE(SUM(CASE WHEN kind='expense' THEN cents END),0) exp"
+            " FROM ledger WHERE currency=?",
+            (currency,),
+        ).fetchone()
+        inc, exp = int(r["inc"]), int(r["exp"])
+        return {"income": inc, "expense": exp, "balance": inc - exp}
+
+    def ledger_daily(self, currency: str, start: str, end: str) -> dict[str, dict]:
+        """[start,end] 内按天汇总: {day: {inc, exp}}."""
+        out: dict[str, dict] = {}
+        for r in self.conn.execute(
+            "SELECT day,"
+            " COALESCE(SUM(CASE WHEN kind='income'  THEN cents END),0) inc,"
+            " COALESCE(SUM(CASE WHEN kind='expense' THEN cents END),0) exp"
+            " FROM ledger WHERE currency=? AND day BETWEEN ? AND ?"
+            " GROUP BY day",
+            (currency, start, end),
+        ):
+            out[r["day"]] = {"inc": int(r["inc"]), "exp": int(r["exp"])}
+        return out
+
+    def ledger_month(self, currency: str, year: int, month: int) -> dict:
+        """某月总收支."""
+        pre = f"{year:04d}-{month:02d}"
+        r = self.conn.execute(
+            "SELECT"
+            " COALESCE(SUM(CASE WHEN kind='income'  THEN cents END),0) inc,"
+            " COALESCE(SUM(CASE WHEN kind='expense' THEN cents END),0) exp,"
+            " COUNT(*) n"
+            " FROM ledger WHERE currency=? AND day LIKE ?",
+            (currency, pre + "%"),
+        ).fetchone()
+        inc, exp = int(r["inc"]), int(r["exp"])
+        return {"income": inc, "expense": exp, "balance": inc - exp, "count": int(r["n"])}
+
+    # ------------------------------------------------------------ 记鹿
+    def deer_set(self, day: str, level: int) -> None:
+        """记下某天的鹿次数. 一天只留一条 —— 再按就是覆盖当天的值."""
+        level = max(0, min(3, int(level)))
+        self.conn.execute(
+            "INSERT INTO deer (day,level,at) VALUES (?,?,?)"
+            " ON CONFLICT(day) DO UPDATE SET level=excluded.level, at=excluded.at",
+            (day, level, _now()),
+        )
+        self.conn.commit()
+
+    def deer_del(self, day: str) -> None:
+        self.conn.execute("DELETE FROM deer WHERE day=?", (day,))
+        self.conn.commit()
+
+    def deer_get(self, day: str) -> int | None:
+        r = self.conn.execute("SELECT level FROM deer WHERE day=?", (day,)).fetchone()
+        return int(r["level"]) if r else None
+
+    def deer_month(self, year: int, month: int) -> dict[str, int]:
+        pre = f"{year:04d}-{month:02d}"
+        return {
+            r["day"]: int(r["level"]) for r in self.conn.execute(
+                "SELECT day, level FROM deer WHERE day LIKE ?", (pre + "%",)
+            )
+        }
+
+    # ------------------------------------------------------------ 新标日测试
+    def minna_all_progress(self) -> dict[int, sqlite3.Row]:
+        """每课进度, 按课号索引."""
+        return {
+            int(r["lesson"]): r
+            for r in self.conn.execute("SELECT * FROM minna_progress")
+        }
+
+    def minna_progress(self, lesson: int) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT * FROM minna_progress WHERE lesson=?", (lesson,)).fetchone()
+
+    def minna_start(self, lesson: int, total: int) -> None:
+        """开始一课: 计时起点, 清掉该课上一次作答结果."""
+        now = _now()
+        self.conn.execute("DELETE FROM minna_result WHERE lesson=?", (lesson,))
+        self.conn.execute(
+            "INSERT INTO minna_progress"
+            " (lesson,status,section,idx,seconds,score,total,started_at,finished_at,updated_at)"
+            " VALUES (?,?,0,0,0,0,?,?,NULL,?)"
+            " ON CONFLICT(lesson) DO UPDATE SET"
+            " status='doing', section=0, idx=0, seconds=0, score=0,"
+            " total=excluded.total, started_at=excluded.started_at,"
+            " finished_at=NULL, updated_at=excluded.updated_at",
+            (lesson, "doing", total, now, now),
+        )
+        self.conn.commit()
+
+    def minna_save_cursor(self, lesson: int, section: int, idx: int,
+                          seconds: int, score: int) -> None:
+        """中途退出时保存位置 (不改 status, 仍是 doing)."""
+        self.conn.execute(
+            "UPDATE minna_progress SET section=?, idx=?, seconds=?, score=?,"
+            " updated_at=? WHERE lesson=?",
+            (section, idx, seconds, score, _now(), lesson),
+        )
+        self.conn.commit()
+
+    def minna_mark(self, lesson: int, qid: str, ok: bool) -> None:
+        self.conn.execute(
+            "INSERT INTO minna_result (lesson,qid,ok) VALUES (?,?,?)"
+            " ON CONFLICT(lesson,qid) DO UPDATE SET ok=excluded.ok",
+            (lesson, qid, 1 if ok else 0),
+        )
+        self.conn.commit()
+
+    def minna_finish(self, lesson: int, seconds: int, score: int, total: int) -> None:
+        now = _now()
+        self.conn.execute(
+            "UPDATE minna_progress SET status='done', seconds=?, score=?, total=?,"
+            " finished_at=?, updated_at=? WHERE lesson=?",
+            (seconds, score, total, now, now, lesson),
+        )
+        self.conn.commit()
+
+    def minna_results(self, lesson: int) -> dict[str, bool]:
+        return {
+            r["qid"]: bool(r["ok"]) for r in self.conn.execute(
+                "SELECT qid, ok FROM minna_result WHERE lesson=?", (lesson,))
+        }
+
+    def minna_reset(self, lesson: int) -> None:
+        """重做这一课: 清空进度与结果."""
+        self.conn.execute("DELETE FROM minna_result WHERE lesson=?", (lesson,))
+        self.conn.execute("DELETE FROM minna_progress WHERE lesson=?", (lesson,))
         self.conn.commit()

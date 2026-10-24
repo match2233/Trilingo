@@ -11,6 +11,25 @@ from . import sync as sync_mod
 from .db import Database
 
 
+def _enable_dpi_awareness() -> None:
+    """让 Windows 按物理像素渲染, 否则高分屏上 Tk 会被系统拉伸而发虚.
+
+    这是"文字模糊"的根因: 没有 DPI 感知时, 系统把整个窗口位图放大 1.25/1.5 倍,
+    字就被插值糊掉了。声明感知后由我们按真实像素排版, 字体自然锐利。
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        try:                      # Win8.1+: 每显示器 DPI 感知
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:         # noqa: BLE001
+            ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:             # noqa: BLE001
+        pass
+
+
 def _setup_logging() -> None:
     logging.basicConfig(
         filename=str(C.LOG_PATH),
@@ -21,6 +40,7 @@ def _setup_logging() -> None:
 
 
 def main() -> int:
+    _enable_dpi_awareness()
     _setup_logging()
     log = logging.getLogger("trilingo")
     log.info("=== Trilingo 启动 ===")

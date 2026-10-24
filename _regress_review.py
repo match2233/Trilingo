@@ -85,27 +85,29 @@ print(f"  电脑错题 {len(pc.open_mistakes('en'))} 英语 / {len(pc.open_mista
 
 cands = []
 for r in pc.conn.execute(
-        "SELECT m.word_id AS wid, w.word AS word FROM mistakes m"
+        "SELECT m.word_id AS wid, w.word AS word, m.stage AS stage FROM mistakes m"
         " JOIN jp_words w ON w.id=m.word_id"
-        " WHERE m.lang='jp' AND m.graduated=0 AND m.next_due<=?", (t,)):
+        f" WHERE m.lang='jp' AND m.graduated=0 AND m.stage<{len(C.REVIEW_OFFSETS) - 1}"
+        " ORDER BY m.stage DESC, m.next_due"):
     if f"jp:{r['word']}" in frozen["base"]["mistakes"]:
         cands.append((r["word"], r["wid"]))
 
 if not cands:
-    print("\n跳过: 库里没有「今日到期且已冻结进 base」的日语错题")
+    print("\n跳过: 库里没有「已冻结进 base 且还能再推进一档」的日语错题")
     pc.close()
     ph.close()
     sys.exit(0)
 
-check(True, "存在一条「今日到期且已冻结进 base」的日语错题",
-      f"{[c[0] for c in cands]}")
+check(True, "存在一条已冻结进 base 的日语错题", f"{[c[0] for c in cands][:4]}")
 word, wid = cands[0]
+# 把它的复习日挪到今天: 模拟"今天到期 -> 立即复习 -> 答对"的真实序列。
+# base 是同步开始前冻结的, 里面仍是挪动之前的档位/复习日。
+pc.conn.execute("UPDATE mistakes SET next_due=? WHERE lang='jp' AND word_id=?", (t, wid))
+pc.conn.commit()
 print(f"  样本词: 「{word}」  base 里 = {frozen['base']['mistakes']['jp:' + word]}")
 
 print()
 print("=== 1) 点「立即复习」并入今日 ===")
-pc.conn.execute("UPDATE mistakes SET next_due=? WHERE lang='jp' AND word_id=?", (t, wid))
-pc.conn.commit()
 pc.add_to_today("jp", wid)
 check(word in due_words(pc, "jp"), "该词在今日待复习里")
 

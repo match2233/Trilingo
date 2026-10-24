@@ -33,43 +33,44 @@ class LifeFrame(tk.Frame):
                  bg=theme.BG, fg=theme.MUTED, font=theme.f(10)).pack(anchor="w", padx=32)
 
         grid = tk.Frame(self, bg=theme.BG)
-        grid.pack(fill="x", padx=30, pady=(16, 26))
+        grid.pack(fill="both", expand=True, padx=30, pady=(14, 26))
+        grid.grid_rowconfigure(0, weight=1)
         for c in (0, 1):
             grid.grid_columnconfigure(c, weight=1, uniform="life")
 
-        self.tiles: dict[str, tuple[tk.Frame, FlatButton]] = {}
+        self.tiles: dict[str, tuple[Card, FlatButton]] = {}
         self._tile(grid, 0, "ledger", "记账", "收入 · 支出 · 账单明细", "¥",
                    theme.PRIMARY, theme.PRIMARY_SOFT)
         self._tile(grid, 1, "deer", "记鹿", "每天记一次 · 月历/年历统计", "🦌",
                    theme.SUCCESS, theme.SUCCESS_SOFT)
 
     def _tile(self, parent, col, key, title, sub, glyph, color, soft) -> None:
-        """一块紧凑的入口按钮: 上图标, 下标题+副标题.
+        """整张大卡片都是点击热区, 悬停时整块一起染色.
 
-        之前是"整块大白卡 + 内容散在上下", 看起来像两个空文本框;
-        现在高度贴合内容, 边框改用主题色淡边, 一眼就是可点的按钮。
+        FlatButton 只覆盖"标题+副标题"那一条, 图标和四周留白要另外绑,
+        否则鼠标移过去既没有高亮也点不进去。
         """
-        card = tk.Frame(parent, bg=theme.CARD, highlightthickness=1,
-                        highlightbackground=color)
+        card = Card(parent)
         card.grid(row=0, column=col, sticky="nsew",
                   padx=(0, 10) if col == 0 else (10, 0))
-
         box = tk.Frame(card, bg=theme.CARD)
-        box.pack(fill="both", expand=True, padx=18, pady=18)
+        box.pack(fill="both", expand=True)
 
         mark = tk.Label(box, text=glyph, bg=theme.CARD, fg=color,
-                        font=theme.f(40, "bold"))
-        mark.pack(pady=(6, 2))
+                        font=theme.f(46, "bold"))
+        mark.pack(expand=True)
         btn = FlatButton(box, title, lambda k=key: self.app.show(k),
                          bg=theme.CARD, hover=soft, active_bg=soft,
-                         font=theme.f(21, "bold"), fg=color, pady=2,
-                         border=theme.CARD)
-        btn.pack(fill="x")
+                         font=theme.f(23, "bold"), fg=color, pady=8)
+        btn.pack(fill="x", padx=2)
         btn.set_subtitle(sub)
+        btn.configure(highlightbackground=theme.CARD)
+        spacer = tk.Frame(box, bg=theme.CARD)
+        spacer.pack(expand=True, fill="both")
 
-        # 整块都能点、都能高亮 (card 是外框, 也要绑, 否则边框那圈是死区)
-        btn.bind_hover_group(card, box, mark)
-        for w in (card, box, mark):
+        # 卡片、图标、留白全部纳入同一组高亮 + 同一个动作
+        btn.bind_hover_group(card, box, mark, spacer)
+        for w in (card, box, mark, spacer):
             w.bind("<Button-1>", lambda e, k=key: self.app.show(k))
         self.tiles[key] = (card, btn)
 

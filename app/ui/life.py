@@ -29,8 +29,8 @@ class LifeFrame(tk.Frame):
         self.summary = tk.Label(head, text="", bg=theme.BG, fg=theme.MUTED, font=theme.f(10))
         self.summary.pack(side="right")
 
-        tk.Label(self, text="仅保存在本机，不参与跨设备同步",
-                 bg=theme.BG, fg=theme.MUTED, font=theme.f(9)).pack(anchor="w", padx=32)
+        tk.Label(self, text="记账与记鹿都会随同步在设备间共享",
+                 bg=theme.BG, fg=theme.MUTED, font=theme.f(10)).pack(anchor="w", padx=32)
 
         grid = tk.Frame(self, bg=theme.BG)
         grid.pack(fill="x", padx=30, pady=(16, 26))

@@ -680,14 +680,12 @@ function renderPaper(justFinished) {
           ? `(${marks[it.answer - 1] || it.answer})` : '';
         return `<div class="paper-line${bad}">${star}<span class="pno">${i + 1}.</span>`
           + `<span class="pq">${esc(it.prompt)}</span>`
-          + `<span class="popt">${opts}</span>`
-          + `${bad ? '<span class="pmark">✗</span>' : ''}`
-          + `<span class="pa">${want}</span></div>`;
+          + `<span class="pa">${bad ? '✗ ' : ''}${want}</span>`
+          + `<span class="popt">${opts}</span></div>`;
       }
       return `<div class="paper-line${bad}">${star}<span class="pno">${i + 1}.</span>`
         + `<span class="pq">${esc(it.prompt)}</span>`
-        + `${bad ? '<span class="pmark">✗</span>' : ''}`
-        + `<span class="pa">${esc(it.answer || '—')}</span></div>`;
+        + `<span class="pa">${bad ? '✗ ' : ''}${esc(it.answer || '—')}</span></div>`;
     }).join('');
     const cls = sec.kind === 'fill' ? 'paper-fill' : 'paper-rows';
     return `<div class="paper-sec"><h3>${sec.no}、${esc(sec.title)}</h3>`

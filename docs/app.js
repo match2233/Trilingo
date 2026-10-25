@@ -482,6 +482,43 @@ async function doSync(manual) {
   }
 }
 
+/* ------------------------------------------------------------------ 试卷集 */
+async function renderExams() {
+  const list = $('examList');
+  if (!list) return;
+  let cols = [];
+  try {
+    const r = await fetch('exams/index.json', { cache: 'no-cache' });
+    if (r.ok) cols = (await r.json()).collections || [];
+  } catch (e) { /* 离线时下面兜底 */ }
+  if (!cols.length) {
+    cols = [{ id: 'shinbunpo-1', name: '新标日初级上单元测试', kind: 'unit',
+              desc: '24 课同步测试卷', papers: 24, items: 1285,
+              bank: 'minna_tests.json', empty: false }];
+  }
+  const tag = { unit: '单元卷', jlpt: '能力考' };
+  $('examsSummary').textContent =
+    `${cols.length} 套试卷集　·　${cols.reduce((a, c) => a + (c.papers || 0), 0)} 份卷子`;
+  list.innerHTML = cols.map((c) => `
+    <button class="tile exam-row" data-id="${esc(c.id)}">
+      <span class="tile-tag ${c.kind === 'jlpt' ? 'blue' : 'orange'}">${tag[c.kind] || '试卷'}</span>
+      <span class="tile-main">${esc(c.name)}</span>
+      <span class="tile-foot">${c.empty
+        ? '还没有卷子 · 请在电脑端导入'
+        : `${c.papers} 份卷子 · ${c.items} 题${c.duration_min ? ` · 限时 ${c.duration_min} 分钟` : ''}`}</span>
+    </button>`).join('');
+  list.querySelectorAll('.exam-row').forEach((el) => {
+    el.onclick = async () => {
+      const row = cols.find((c) => c.id === el.dataset.id);
+      if (!row) return;
+      if (row.empty) { toast('这套试卷还没有卷子，请先在电脑端导入'); return; }
+      await Minna.openCollection(row);
+      Minna.renderList();
+      showView('minna');
+    };
+  });
+}
+
 /* ------------------------------------------------------------------ 视图切换 */
 
 function showView(name) {
@@ -526,9 +563,10 @@ function bind() {
   $('tileErr').onclick = () => { renderMistakes(); showView('mistakes'); };
   $('tileMinna').onclick = () => {
     if (typeof Minna === 'undefined' || !Minna) { toast('题库模块未加载'); return; }
-    Minna.renderList();
-    showView('minna');
+    renderExams();
+    showView('exams');
   };
+  $('examsBack').onclick = () => showView('home');
   $('tileSentence').onclick = () => showView('sentence');
   $('tileLife').onclick = () => showView('life');
   $('tileLedger').onclick = () => {
@@ -544,7 +582,7 @@ function bind() {
   $('ledgerBack').onclick = () => showView('life');
   $('deerBack').onclick = () => showView('life');
   $('lifeBack').onclick = () => showView('home');
-  $('minnaBack').onclick = () => { Minna.renderList(); showView('home'); };
+  $('minnaBack').onclick = () => { renderExams(); showView('exams'); };
   $('favBack').onclick = () => { Minna.renderList(); showView('minna'); };
   $('mtBack').onclick = () => Minna.leave();
 

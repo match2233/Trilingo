@@ -5,7 +5,7 @@
  */
 
 // 改动 docs/ 下的任何文件后, 把版本号加一, 否则手机会一直用缓存里的旧版本
-const CACHE = 'trilingo-v22';
+const CACHE = 'trilingo-v23';
 
 const SHELL = [
   './',
@@ -17,6 +17,7 @@ const SHELL = [
   './life.js',
   './llm.js',
   './minna_tests.json',
+  './exams/index.json',
   './style.css',
   './manifest.webmanifest',
   './icons/icon-180.png',

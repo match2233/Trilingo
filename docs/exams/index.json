@@ -1,0 +1,25 @@
+{
+ "collections": [
+  {
+   "id": "shinbunpo-1",
+   "name": "新标日初级上单元测试",
+   "kind": "unit",
+   "desc": "24 课同步测试卷",
+   "duration_min": 0,
+   "papers": 24,
+   "items": 1285,
+   "empty": false,
+   "bank": "minna_tests.json"
+  },
+  {
+   "id": "jlpt-n5",
+   "name": "JLPT-N5",
+   "kind": "jlpt",
+   "desc": "日语能力考 N5 真题（待导入）",
+   "duration_min": 105,
+   "papers": 0,
+   "items": 0,
+   "empty": true
+  }
+ ]
+}

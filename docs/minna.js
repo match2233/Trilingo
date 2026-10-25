@@ -26,6 +26,8 @@ function prettyPrompt(text) {
 const KIND_NAME = { fill: '填空', choice: '选择', translate: '翻译' };
 
 export const M = {
+  collection: 'shinbunpo-1',
+  collectionName: '新标日初级上单元测试',
   bank: null,
   lesson: null,
   sections: [],
@@ -178,6 +180,27 @@ export function renderFav() {
 
 /* ------------------------------------------------------------------ 题库 */
 
+export async function openCollection(row) {
+  M.collection = row.id;
+  M.collectionName = row.name || row.id;
+  M.durationMin = Number(row.duration_min) || 0;
+  if (row.empty) { M.bank = { lessons: [] }; M.lessons = []; return M.bank; }
+  try {
+    const r = await fetch(row.bank || 'minna_tests.json', { cache: 'force-cache' });
+    if (r.ok) {
+      const j = await r.json();
+      if ((j.lessons || []).length) {
+        M.bank = j; cacheBank(j);
+        M.durationMin = Number((j.meta && j.meta.duration_min) || M.durationMin) || 0;
+        return M.bank;
+      }
+    }
+  } catch (e) { /* 下面走缓存 */ }
+  const cached = readCachedBank();
+  M.bank = cached || { lessons: [] };
+  return M.bank;
+}
+
 export async function loadBank() {
   if (M.bank && (M.bank.lessons || []).length) return M.bank;
   // 1) 优先用随应用部署的那份 (公开仓库里不放题库, 见 README)
@@ -255,6 +278,7 @@ export function fmtSec(sec) {
 /* ------------------------------------------------------------------ 列表页 */
 
 export function renderList() {
+  const t = $('minnaTitle'); if (t) t.textContent = M.collectionName;
   const all = allProgress();
   const les = lessons();
   let done = 0;

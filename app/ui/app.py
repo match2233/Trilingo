@@ -86,6 +86,10 @@ class TrilingoApp(tk.Tk):
             from .deer import DeerFrame
 
             return DeerFrame(self.container, self)
+        if name == "exams":
+            from .exam_picker import ExamPickerFrame
+
+            return ExamPickerFrame(self.container, self)
         if name == "minna":
             from .minna import MinnaListFrame
 
@@ -256,9 +260,9 @@ class MenuFrame(tk.Frame):
                                   lambda: self.app.show("mistakes"))
 
         # 第二行: 新标日测试 / 句子练习 / 生活记录
-        self.btn_minna = self._quad(grid, 1, 0, "新标日测试", "24 课同步测试卷",
+        self.btn_minna = self._quad(grid, 1, 0, "日语测试", "新标日 · JLPT",
                                     theme.PRIMARY_DARK, theme.PRIMARY_SOFT,
-                                    lambda: self.app.show("minna"))
+                                    lambda: self.app.show("exams"))
         self.btn_sentence = self._quad(grid, 1, 1, "句子练习", "开发中",
                                        theme.MUTED, theme.BG,
                                        lambda: self.app.show("sentence"))

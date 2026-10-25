@@ -147,7 +147,8 @@ CREATE TABLE IF NOT EXISTS deer (
 -- 题库本身是 data/minna_tests.json (桌面与 PWA 共用同一份), 这里只存进度。
 -- 进度**不参与跨设备同步**: 每台设备各记各的, 避免再动那套脆弱的事件同步。
 CREATE TABLE IF NOT EXISTS minna_progress (
-    lesson      INTEGER PRIMARY KEY,
+    collection  TEXT NOT NULL DEFAULT 'shinbunpo-1',
+    lesson      INTEGER NOT NULL,
     status      TEXT NOT NULL DEFAULT 'idle',   -- idle / doing / done
     section     INTEGER NOT NULL DEFAULT 0,     -- 当前在第几大题 (恢复用)
     idx         INTEGER NOT NULL DEFAULT 0,     -- 该大题内第几小题
@@ -156,25 +157,28 @@ CREATE TABLE IF NOT EXISTS minna_progress (
     total       INTEGER NOT NULL DEFAULT 0,     -- 总题数
     started_at  TEXT,
     finished_at TEXT,
-    updated_at  TEXT
+    updated_at  TEXT,
+    PRIMARY KEY (collection, lesson)
 );
 
 -- 每道题的判定结果: 1 对 / 0 错。未答的题没有行。
 CREATE TABLE IF NOT EXISTS minna_result (
+    collection TEXT NOT NULL DEFAULT 'shinbunpo-1',
     lesson  INTEGER NOT NULL,
     qid     TEXT NOT NULL,            -- 题库里的稳定 id: L01-S1-3
     ok      INTEGER NOT NULL,
-    PRIMARY KEY (lesson, qid)
+    PRIMARY KEY (collection, lesson, qid)
 );
 
 -- 收藏的题目 + 自己的笔记 (与题库内容分开存, 题库重新生成也不会冲掉笔记)
 CREATE TABLE IF NOT EXISTS minna_fav (
+    collection TEXT NOT NULL DEFAULT 'shinbunpo-1',
     lesson     INTEGER NOT NULL,
     qid        TEXT NOT NULL,
     note       TEXT NOT NULL DEFAULT '',
     created_at TEXT,
     updated_at TEXT,
-    PRIMARY KEY (lesson, qid)
+    PRIMARY KEY (collection, lesson, qid)
 );
 """
 
@@ -200,6 +204,51 @@ class Database:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(SCHEMA)
+        self.minna_col = "shinbunpo-1"
+        self._migrate_minna_collection()
+        self.conn.commit()
+
+    def _migrate_minna_collection(self) -> None:
+        """老库升级: 三张测试表补上 collection 列 (默认归到新标日初级上).
+
+        SQLite 改不了主键, 只能建新表再搬数据; 已经有 collection 的库再跑
+        一次什么也不会发生。
+        """
+        plans = (
+            ("minna_progress",
+             "collection TEXT NOT NULL DEFAULT 'shinbunpo-1', lesson INTEGER NOT NULL,"
+             " status TEXT NOT NULL DEFAULT 'idle', section INTEGER NOT NULL DEFAULT 0,"
+             " idx INTEGER NOT NULL DEFAULT 0, seconds INTEGER NOT NULL DEFAULT 0,"
+             " score INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL DEFAULT 0,"
+             " started_at TEXT, finished_at TEXT, updated_at TEXT,"
+             " PRIMARY KEY (collection, lesson)",
+             ["lesson", "status", "section", "idx", "seconds", "score", "total",
+              "started_at", "finished_at", "updated_at"], True),
+            ("minna_result",
+             "collection TEXT NOT NULL DEFAULT 'shinbunpo-1', lesson INTEGER NOT NULL,"
+             " qid TEXT NOT NULL, ok INTEGER NOT NULL,"
+             " PRIMARY KEY (collection, lesson, qid)",
+             ["lesson", "qid", "ok"], False),
+            ("minna_fav",
+             "collection TEXT NOT NULL DEFAULT 'shinbunpo-1', lesson INTEGER NOT NULL,"
+             " qid TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',"
+             " created_at TEXT, updated_at TEXT,"
+             " PRIMARY KEY (collection, lesson, qid)",
+             ["lesson", "qid", "note", "created_at", "updated_at"], False),
+        )
+        for table, decl, cols, drop_pk in plans:
+            info = self.conn.execute(f"PRAGMA table_info({table})").fetchall()
+            if not info or any(r["name"] == "collection" for r in info):
+                continue
+            tmp = f"{table}_new"
+            self.conn.execute(f"DROP TABLE IF EXISTS {tmp}")
+            self.conn.execute(f"CREATE TABLE {tmp} ({decl})")
+            joined = ", ".join(cols)
+            self.conn.execute(
+                f"INSERT OR IGNORE INTO {tmp} (collection, {joined})"
+                f" SELECT 'shinbunpo-1', {joined} FROM {table}")
+            self.conn.execute(f"DROP TABLE {table}")
+            self.conn.execute(f"ALTER TABLE {tmp} RENAME TO {table}")
         self.conn.commit()
 
     def close(self) -> None:
@@ -1161,30 +1210,42 @@ class Database:
         }
 
     # ------------------------------------------------------------ 新标日测试
+    # ------------------------------------------------------------ 测试卷 (按试卷集隔离)
+    # self.minna_col 决定"当前在哪套卷子": 进度、成绩、收藏都带上 collection,
+    # 这样初级上的第 1 课和 N5 的第 1 套卷不会互相覆盖。
+    def _col(self) -> str:
+        return getattr(self, "minna_col", None) or "shinbunpo-1"
+
+    def set_collection(self, cid: str) -> None:
+        self.minna_col = cid or "shinbunpo-1"
+
     def minna_all_progress(self) -> dict[int, sqlite3.Row]:
-        """每课进度, 按课号索引."""
         return {
-            int(r["lesson"]): r
-            for r in self.conn.execute("SELECT * FROM minna_progress")
+            int(r["lesson"]): r for r in self.conn.execute(
+                "SELECT * FROM minna_progress WHERE collection=?", (self._col(),))
         }
 
     def minna_progress(self, lesson: int) -> sqlite3.Row | None:
         return self.conn.execute(
-            "SELECT * FROM minna_progress WHERE lesson=?", (lesson,)).fetchone()
+            "SELECT * FROM minna_progress WHERE collection=? AND lesson=?",
+            (self._col(), lesson)).fetchone()
 
     def minna_start(self, lesson: int, total: int) -> None:
         """开始一课: 计时起点, 清掉该课上一次作答结果."""
         now = _now()
-        self.conn.execute("DELETE FROM minna_result WHERE lesson=?", (lesson,))
+        col = self._col()
+        self.conn.execute(
+            "DELETE FROM minna_result WHERE collection=? AND lesson=?", (col, lesson))
         self.conn.execute(
             "INSERT INTO minna_progress"
-            " (lesson,status,section,idx,seconds,score,total,started_at,finished_at,updated_at)"
-            " VALUES (?,?,0,0,0,0,?,?,NULL,?)"
-            " ON CONFLICT(lesson) DO UPDATE SET"
+            " (collection,lesson,status,section,idx,seconds,score,total,"
+            "  started_at,finished_at,updated_at)"
+            " VALUES (?,?,'doing',0,0,0,0,?,?,NULL,?)"
+            " ON CONFLICT(collection,lesson) DO UPDATE SET"
             " status='doing', section=0, idx=0, seconds=0, score=0,"
             " total=excluded.total, started_at=excluded.started_at,"
             " finished_at=NULL, updated_at=excluded.updated_at",
-            (lesson, "doing", total, now, now),
+            (col, lesson, total, now, now),
         )
         self.conn.commit()
 
@@ -1193,16 +1254,16 @@ class Database:
         """中途退出时保存位置 (不改 status, 仍是 doing)."""
         self.conn.execute(
             "UPDATE minna_progress SET section=?, idx=?, seconds=?, score=?,"
-            " updated_at=? WHERE lesson=?",
-            (section, idx, seconds, score, _now(), lesson),
+            " updated_at=? WHERE collection=? AND lesson=?",
+            (section, idx, seconds, score, _now(), self._col(), lesson),
         )
         self.conn.commit()
 
     def minna_mark(self, lesson: int, qid: str, ok: bool) -> None:
         self.conn.execute(
-            "INSERT INTO minna_result (lesson,qid,ok) VALUES (?,?,?)"
-            " ON CONFLICT(lesson,qid) DO UPDATE SET ok=excluded.ok",
-            (lesson, qid, 1 if ok else 0),
+            "INSERT INTO minna_result (collection,lesson,qid,ok) VALUES (?,?,?,?)"
+            " ON CONFLICT(collection,lesson,qid) DO UPDATE SET ok=excluded.ok",
+            (self._col(), lesson, qid, 1 if ok else 0),
         )
         self.conn.commit()
 
@@ -1210,112 +1271,139 @@ class Database:
         now = _now()
         self.conn.execute(
             "UPDATE minna_progress SET status='done', seconds=?, score=?, total=?,"
-            " finished_at=?, updated_at=? WHERE lesson=?",
-            (seconds, score, total, now, now, lesson),
+            " finished_at=?, updated_at=? WHERE collection=? AND lesson=?",
+            (seconds, score, total, now, now, self._col(), lesson),
         )
         self.conn.commit()
 
     def minna_results(self, lesson: int) -> dict[str, bool]:
         return {
             r["qid"]: bool(r["ok"]) for r in self.conn.execute(
-                "SELECT qid, ok FROM minna_result WHERE lesson=?", (lesson,))
+                "SELECT qid, ok FROM minna_result WHERE collection=? AND lesson=?",
+                (self._col(), lesson))
         }
 
     def minna_reset(self, lesson: int) -> None:
         """重做这一课: 清空进度与结果 (收藏与笔记保留)."""
-        self.conn.execute("DELETE FROM minna_result WHERE lesson=?", (lesson,))
-        self.conn.execute("DELETE FROM minna_progress WHERE lesson=?", (lesson,))
+        col = self._col()
+        self.conn.execute(
+            "DELETE FROM minna_result WHERE collection=? AND lesson=?", (col, lesson))
+        self.conn.execute(
+            "DELETE FROM minna_progress WHERE collection=? AND lesson=?", (col, lesson))
         self.conn.commit()
 
     # ------------------------------------------------------------ 收藏
     def minna_fav_ids(self) -> set[tuple[int, str]]:
         return {(int(r["lesson"]), r["qid"]) for r in self.conn.execute(
-            "SELECT lesson, qid FROM minna_fav")}
+            "SELECT lesson, qid FROM minna_fav WHERE collection=?", (self._col(),))}
 
     def minna_fav_all(self) -> list[dict]:
         """收藏夹: 按课、题号排序; 带上笔记."""
         return [dict(r) for r in self.conn.execute(
             "SELECT lesson, qid, note, created_at, updated_at FROM minna_fav"
-            " ORDER BY lesson, qid")]
+            " WHERE collection=? ORDER BY lesson, qid", (self._col(),))]
+
+    def minna_fav_count(self, cid: str | None = None) -> int:
+        r = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM minna_fav WHERE collection=?",
+            (cid or self._col(),)).fetchone()
+        return int(r["n"]) if r else 0
 
     def minna_fav_get(self, lesson: int, qid: str) -> dict | None:
         r = self.conn.execute(
-            "SELECT lesson, qid, note FROM minna_fav WHERE lesson=? AND qid=?",
-            (lesson, qid)).fetchone()
+            "SELECT lesson, qid, note FROM minna_fav"
+            " WHERE collection=? AND lesson=? AND qid=?",
+            (self._col(), lesson, qid)).fetchone()
         return dict(r) if r else None
 
     def minna_fav_toggle(self, lesson: int, qid: str) -> bool:
         """收藏/取消收藏, 返回操作后是否处于收藏状态."""
+        col = self._col()
         cur = self.conn.execute(
-            "SELECT 1 FROM minna_fav WHERE lesson=? AND qid=?", (lesson, qid)
-        ).fetchone()
+            "SELECT 1 FROM minna_fav WHERE collection=? AND lesson=? AND qid=?",
+            (col, lesson, qid)).fetchone()
         if cur:
             self.conn.execute(
-                "DELETE FROM minna_fav WHERE lesson=? AND qid=?", (lesson, qid))
+                "DELETE FROM minna_fav WHERE collection=? AND lesson=? AND qid=?",
+                (col, lesson, qid))
             self.conn.commit()
             return False
         now = _now()
         self.conn.execute(
-            "INSERT INTO minna_fav (lesson, qid, note, created_at, updated_at)"
-            " VALUES (?,?,?,?,?)", (lesson, qid, "", now, now))
+            "INSERT INTO minna_fav (collection,lesson,qid,note,created_at,updated_at)"
+            " VALUES (?,?,?,?,?,?)", (col, lesson, qid, "", now, now))
         self.conn.commit()
         return True
 
     def minna_fav_note(self, lesson: int, qid: str, note: str) -> None:
         now = _now()
         self.conn.execute(
-            "INSERT INTO minna_fav (lesson, qid, note, created_at, updated_at)"
-            " VALUES (?,?,?,?,?)"
-            " ON CONFLICT(lesson, qid) DO UPDATE SET note=excluded.note,"
+            "INSERT INTO minna_fav (collection,lesson,qid,note,created_at,updated_at)"
+            " VALUES (?,?,?,?,?,?)"
+            " ON CONFLICT(collection,lesson,qid) DO UPDATE SET note=excluded.note,"
             " updated_at=excluded.updated_at",
-            (lesson, qid, note, now, now))
+            (self._col(), lesson, qid, note, now, now))
         self.conn.commit()
 
     def minna_fav_remove(self, lesson: int, qid: str) -> None:
         self.conn.execute(
-            "DELETE FROM minna_fav WHERE lesson=? AND qid=?", (lesson, qid))
+            "DELETE FROM minna_fav WHERE collection=? AND lesson=? AND qid=?",
+            (self._col(), lesson, qid))
         self.conn.commit()
 
     # ------------------------------------------------------------ 收藏同步
     def export_fav(self) -> dict:
-        """收藏打包成 {qid: {note, at}} —— 与手机端同一结构, 合并即求并集."""
+        """收藏打包成 {"collection:qid": {note, at}}; 合并即求并集."""
         out: dict[str, dict] = {}
         for r in self.conn.execute(
-                "SELECT lesson, qid, note, updated_at FROM minna_fav"):
-            out[r["qid"]] = {"note": r["note"] or "",
-                             "at": r["updated_at"] or ""}
+                "SELECT collection, qid, note, updated_at FROM minna_fav"):
+            key = f'{r["collection"]}:{r["qid"]}'
+            out[key] = {"note": r["note"] or "", "at": r["updated_at"] or ""}
         return out
+
+    @staticmethod
+    def _split_key(key: str) -> tuple[str, str]:
+        """兼容老格式: 没有 "col:" 前缀的视为新标日初级上."""
+        if ":" in key:
+            col, qid = key.split(":", 1)
+            if qid.startswith("Q") or qid.startswith("L"):
+                return col, qid
+        return "shinbunpo-1", key
 
     def apply_fav(self, fav: dict) -> int:
         """并入另一台设备的收藏: 同一题取较新的笔记, 没见过的直接加."""
         added = 0
-        for qid, rec in (fav or {}).items():
+        for key, rec in (fav or {}).items():
             if not isinstance(rec, dict):
                 continue
-            m = re.match(r"L(\d+)-", str(qid))
+            col, qid = self._split_key(str(key))
+            m = re.match(r"(?:L|Q)(\d+)", qid)
             if not m:
                 continue
             lesson = int(m.group(1))
             cur = self.conn.execute(
-                "SELECT note, updated_at FROM minna_fav WHERE lesson=? AND qid=?",
-                (lesson, qid)).fetchone()
+                "SELECT note, updated_at FROM minna_fav"
+                " WHERE collection=? AND lesson=? AND qid=?",
+                (col, lesson, qid)).fetchone()
             note = str(rec.get("note") or "")
             at = str(rec.get("at") or "")
             if cur is None:
                 self.conn.execute(
-                    "INSERT INTO minna_fav (lesson, qid, note, created_at, updated_at)"
-                    " VALUES (?,?,?,?,?)", (lesson, qid, note, at or _now(), at or _now()))
+                    "INSERT INTO minna_fav (collection,lesson,qid,note,created_at,updated_at)"
+                    " VALUES (?,?,?,?,?,?)", (col, lesson, qid, note,
+                                              at or _now(), at or _now()))
                 added += 1
             elif at and at > str(cur["updated_at"] or "") and note != (cur["note"] or ""):
                 self.conn.execute(
-                    "UPDATE minna_fav SET note=?, updated_at=? WHERE lesson=? AND qid=?",
-                    (note, at, lesson, qid))
+                    "UPDATE minna_fav SET note=?, updated_at=?"
+                    " WHERE collection=? AND lesson=? AND qid=?",
+                    (note, at, col, lesson, qid))
                 added += 1
             elif note and not (cur["note"] or ""):
-                # 本机有这条但没有笔记, 对方有笔记 -> 补上
                 self.conn.execute(
-                    "UPDATE minna_fav SET note=? WHERE lesson=? AND qid=?",
-                    (note, lesson, qid))
+                    "UPDATE minna_fav SET note=?"
+                    " WHERE collection=? AND lesson=? AND qid=?",
+                    (note, col, lesson, qid))
                 added += 1
         if added:
             self.conn.commit()

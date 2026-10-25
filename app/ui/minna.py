@@ -17,6 +17,7 @@ class MinnaListFrame(tk.Frame):
         super().__init__(master, bg=theme.BG)
         self.grid(row=0, column=0, sticky="nsew")
         self.app = app
+        self.collection = "shinbunpo-1"
         self._rows: dict[int, dict] = {}
         self._build()
 
@@ -24,16 +25,20 @@ class MinnaListFrame(tk.Frame):
     def _build(self) -> None:
         head = tk.Frame(self, bg=theme.BG)
         head.pack(fill="x", padx=22, pady=(14, 2))
-        FlatButton(head, "← 返回", lambda: self.app.show("menu"), bg=theme.CARD,
+        FlatButton(head, "← 返回", lambda: self.app.show("exams"), bg=theme.CARD,
                    font=theme.f(11), padx=12, pady=6).pack(side="left")
-        tk.Label(head, text="新标日测试", bg=theme.BG, fg=theme.TEXT,
-                 font=theme.f(19, "bold")).pack(side="left", padx=14)
+        self.title = tk.Label(head, text="日语测试", bg=theme.BG, fg=theme.TEXT,
+                              font=theme.f(19, "bold"))
+        self.title.pack(side="left", padx=14)
         self.summary = tk.Label(head, text="", bg=theme.BG, fg=theme.MUTED,
                                 font=theme.f(11))
         self.summary.pack(side="right")
         self.fav_btn = FlatButton(head, "收藏夹", lambda: self.app.show("minna_fav"),
                                   bg=theme.CARD, font=theme.f(11), padx=14, pady=6)
-        self.fav_btn.pack(side="right", padx=(0, 12))
+        self.fav_btn.pack(side="right", padx=(0, 10))
+        self.import_btn = FlatButton(head, "导入试卷", self._import,
+                                     bg=theme.CARD, font=theme.f(11), padx=14, pady=6)
+        self.import_btn.pack(side="right", padx=(0, 10))
 
         # 列标题: 与下面的行对齐
         cols = tk.Frame(self, bg=theme.BG)
@@ -50,8 +55,7 @@ class MinnaListFrame(tk.Frame):
         sc = ScrollFrame(self)
         sc.pack(fill="both", expand=True, padx=22, pady=(2, 12))
         self.scroll = sc
-        for les in minna.lessons():
-            self._make_row(sc.body, les)
+        self._list_parent = sc.body
 
         # 版权标注: 题库是从出版教辅转录的, 注明来源
         tk.Label(self, justify="left", anchor="w", bg=theme.BG, fg=theme.MUTED,
@@ -99,7 +103,36 @@ class MinnaListFrame(tk.Frame):
                            "spent": spent, "label": name, "btn": btn}
 
     # ------------------------------------------------------------ 生命周期
-    def on_show(self, **_):
+    def _import(self) -> None:
+        from .import_exam import ImportExamDialog
+        ImportExamDialog(self, self.app, on_done=lambda: self.app.show(
+            "minna", collection=self.collection))
+
+    def _switch(self, cid: str) -> None:
+        """切到某个试卷集: 读题库、告诉 db 当前在哪套卷子、重建列表行."""
+        from .. import exams
+
+        self.collection = cid
+        bank = exams.load(cid)
+        minna.use(bank)
+        self.app.db.set_collection(cid)
+        meta = (bank or {}).get("meta") or exams.DEFAULT_META
+        self.title.configure(text=meta.get("name") or "日语测试")
+        self.fav_btn_meta = meta
+        for w in getattr(self, "_list_parent", self).winfo_children():
+            w.destroy()
+        self._rows.clear()
+        for les in minna.lessons():
+            self._make_row(self._list_parent, les)
+        if not minna.lessons():
+            tk.Label(self._list_parent, bg=theme.BG, fg=theme.MUTED,
+                     font=theme.f(12), justify="left", anchor="w",
+                     text="这套试卷还没有卷子。\n"
+                          "点右上角【导入试卷】，选一个装着试卷 PDF 的文件夹。",
+                     ).pack(fill="x", padx=14, pady=30)
+
+    def on_show(self, collection: str | None = None, **_):
+        self._switch(collection or self.collection)
         prog = self.app.db.minna_all_progress()
         all_les = minna.lessons()
         done = 0

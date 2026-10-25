@@ -118,6 +118,7 @@ class MinnaTestFrame(tk.Frame):
             self.app.show("minna")
             return
         self.les = les
+        self.limit_min = int(les.get("duration_min") or 0)
         self.sections = [s for s in les["sections"] if s.get("items")]
         self.lesson_no = lesson
         self.results = self.app.db.minna_results(lesson)
@@ -140,8 +141,9 @@ class MinnaTestFrame(tk.Frame):
             self.item_i = int(prog["idx"] or 0)
             self._base_seconds = int(prog["seconds"] or 0)
         self._session_start = dt.datetime.now()
-        self.title.configure(text=f"第 {lesson} 课")
-        self.timer_cap.configure(text="用时")
+        self.title.configure(text=f"第 {lesson} 课" if not les.get("title")
+                             else str(les["title"]))
+        self.timer_cap.configure(text="剩余" if self.limit_min else "用时")
         self.timer.pack(side="right", padx=(10, 0))
         self._tick()
         self._render_section()
@@ -172,11 +174,41 @@ class MinnaTestFrame(tk.Frame):
         delta = (dt.datetime.now() - self._session_start).total_seconds()
         return max(0, int(self._base_seconds + delta))
 
+    def limit_seconds(self) -> int:
+        """这份卷子的限时(秒). 0 = 不限时 (练习模式)."""
+        if not self.limit_min:
+            return 0
+        return int(self.limit_min) * 60
+
+    def remaining(self) -> int:
+        """倒计时剩余秒数 (不限时返回 -1)."""
+        limit = self.limit_seconds()
+        if not limit:
+            return -1
+        return max(0, limit - self.elapsed())
+
     def _tick(self) -> None:
         if self._mode != "test":
             return
-        self.timer.configure(text=minna.fmt_clock(self.elapsed()))
+        limit = self.limit_seconds()
+        if limit:
+            left = self.remaining()
+            self.timer.configure(text=minna.fmt_clock(left),
+                                 fg=theme.ERROR if left <= 300 else theme.PRIMARY)
+            if left <= 0:
+                self._time_up()
+                return
+        else:
+            self.timer.configure(text=minna.fmt_clock(self.elapsed()))
         self._tick_id = self.after(1000, self._tick)
+
+    def _time_up(self) -> None:
+        """时间到: 按已作答的交卷, 剩下的题算错."""
+        self._clear_after()
+        messagebox.showinfo("时间到", "这套卷子的时间用完了，按已作答的交卷。",
+                            parent=self)
+        self.foot_btn.pack_forget()
+        self._finish()
 
     def _update_progress(self) -> None:
         total = sum(len(s["items"]) for s in self.sections) or 1

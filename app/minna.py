@@ -18,10 +18,28 @@ CANDIDATES = (
 
 KIND_NAME = {"fill": "填空", "choice": "选择", "translate": "翻译"}
 
+# 当前正在使用的题库 (由界面按试卷集切换); None = 用历史那份
+_ACTIVE: dict | None = None
+
+
+def use(bank: dict | None) -> None:
+    """切换当前试卷集. 传 None 回到默认的历史题库."""
+    global _ACTIVE
+    _ACTIVE = bank
+
+
+def active_meta() -> dict:
+    if _ACTIVE and _ACTIVE.get("meta"):
+        return dict(_ACTIVE["meta"])
+    return {"id": "shinbunpo-1", "name": "新标日初级上单元测试",
+            "kind": "unit", "duration_min": 0}
+
 
 @lru_cache(maxsize=1)
 def load_bank() -> dict:
     """读取题库; 找不到时返回空壳 (界面会提示)。"""
+    if _ACTIVE is not None:
+        return _ACTIVE
     for p in CANDIDATES:
         try:
             if p.is_file():

@@ -1,0 +1,12 @@
+{
+ "version": 2,
+ "meta": {
+  "id": "jlpt-n5",
+  "name": "JLPT-N5",
+  "kind": "jlpt",
+  "desc": "日语能力考 N5 真题（待导入）",
+  "duration_min": 105,
+  "order": 20
+ },
+ "lessons": []
+}

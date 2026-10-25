@@ -18,7 +18,7 @@ from tkinter import messagebox
 
 from .. import llm, minna
 from . import theme
-from .widgets import Card, FlatButton, ScrollFrame
+from .widgets import Card, FlatButton, ScrollFrame, center_window
 
 # 对话型题干里说话人的标记: "A:" "B:" "Ａ：" —— 前面通常跟空格或句末标点
 _SPEAKER = re.compile(r"(?<=[\s。、！？…」』）)])[ \t]*([A-DＡ-Ｄ][:：])")
@@ -109,6 +109,19 @@ class MinnaTestFrame(tk.Frame):
                                   font=theme.f(9))
         self.timer_cap.pack(side="right")
 
+        # 题目选择: 可以跳着做, 不必按顺序
+        self.pick_btn = FlatButton(self.head, "题目选择", self.open_picker,
+                                   bg=theme.CARD, font=theme.f(11),
+                                   padx=12, pady=6)
+        self.pick_btn.pack(side="right", padx=(0, 12))
+
+        # 听力播放条 (只有带音频的卷子才建, 平时 pack_forget)
+        self.audio_bar = tk.Frame(self, bg=theme.CARD, highlightthickness=1,
+                                  highlightbackground=theme.BORDER)
+        self.audio_player = None
+        self._audio_tick = None
+        self._build_audio_bar()
+
         self.progress = tk.Frame(self, bg=theme.BORDER, height=4)
         self.progress.pack(fill="x", padx=30, pady=(2, 6))
         self.progress_bar = tk.Frame(self.progress, bg=theme.PRIMARY, height=4)
@@ -129,6 +142,158 @@ class MinnaTestFrame(tk.Frame):
                                    active_bg=theme.PRIMARY_DARK,
                                    font=theme.f(12, "bold"), padx=26, pady=10)
         # 初始不显示, 该出现时再 pack
+
+        # 全部判定完才出现的【交卷】
+        self.submit_btn = FlatButton(self.foot, "交卷", self._confirm_finish,
+                                     bg=theme.SUCCESS, fg="#FFFFFF",
+                                     hover="#1B8A4B", active_bg="#1B8A4B",
+                                     border=theme.SUCCESS,
+                                     font=theme.f(12, "bold"), padx=22, pady=10)
+
+    # ------------------------------------------------------------ 听力播放器
+    def _build_audio_bar(self) -> None:
+        """听力题用的播放条: ▶/⏸ + 前后 10 秒 + 重头 + 进度."""
+        bar = self.audio_bar
+        self.audio_btn = FlatButton(bar, "▶ 播放", self._audio_toggle,
+                                    bg=theme.PRIMARY, fg="#FFFFFF",
+                                    hover=theme.PRIMARY_DARK,
+                                    active_bg=theme.PRIMARY_DARK,
+                                    font=theme.f(11, "bold"), padx=14, pady=5)
+        self.audio_btn.pack(side="left", padx=(12, 6), pady=6)
+        FlatButton(bar, "« 10 秒", lambda: self._audio_seek(-10),
+                   bg=theme.BG, font=theme.f(10), padx=10, pady=5
+                   ).pack(side="left", padx=3)
+        FlatButton(bar, "10 秒 »", lambda: self._audio_seek(10),
+                   bg=theme.BG, font=theme.f(10), padx=10, pady=5
+                   ).pack(side="left", padx=3)
+        FlatButton(bar, "重头", lambda: self._audio_seek(-99999),
+                   bg=theme.BG, font=theme.f(10), padx=10, pady=5
+                   ).pack(side="left", padx=3)
+        self.audio_time = tk.Label(bar, text="00:00", bg=theme.CARD,
+                                   fg=theme.MUTED, font=theme.f(10))
+        self.audio_time.pack(side="right", padx=12)
+
+    def _audio_load(self, rel: str | None) -> None:
+        """卷子带 audio 字段时装载并显示播放条."""
+        self.audio_bar.pack_forget()
+        if self._audio_tick:
+            self.after_cancel(self._audio_tick)
+            self._audio_tick = None
+        if not rel:
+            return
+        from pathlib import Path as _P
+
+        from ..audio import AudioPlayer
+        from ..config import APP_DIR
+        path = _P(APP_DIR) / "data" / rel
+        if not path.is_file():
+            return
+        if self.audio_player is None:
+            self.audio_player = AudioPlayer()
+        if not self.audio_player.open(str(path)):
+            return
+        self.audio_bar.pack(fill="x", padx=30, pady=(0, 6), before=self.progress)
+        self.audio_btn.set_text("▶ 播放")
+        self._audio_tick = self.after(500, self._audio_update)
+
+    def _audio_toggle(self) -> None:
+        if not self.audio_player or not self.audio_player.opened:
+            return
+        self.audio_player.toggle()
+        self.audio_btn.set_text("⏸ 暂停" if self.audio_player.is_playing() else "▶ 播放")
+
+    def _audio_seek(self, delta: int) -> None:
+        if not self.audio_player or not self.audio_player.opened:
+            return
+        pos = self.audio_player.position() + delta
+        self.audio_player.seek(max(0, pos))
+        self._audio_update()
+
+    def _audio_update(self) -> None:
+        """每半秒刷一次进度; 播完自动变回"播放"."""
+        if not self.audio_bar.winfo_ismapped() or not self.audio_player:
+            self._audio_tick = None
+            return
+        pos = self.audio_player.position()
+        self.audio_time.configure(text=minna.fmt_clock(int(pos)))
+        playing = self.audio_player.is_playing()
+        self.audio_btn.set_text("⏸ 暂停" if playing else "▶ 播放")
+        self._audio_tick = self.after(500, self._audio_update)
+
+    def _audio_stop(self) -> None:
+        if self._audio_tick:
+            self.after_cancel(self._audio_tick)
+            self._audio_tick = None
+        if self.audio_player:
+            self.audio_player.stop()
+            self.audio_player.close()
+
+    # ------------------------------------------------------------ 题目选择
+    def open_picker(self):
+        """题目选择面板: 直接跳到任意一题 (不必按顺序做). 返回窗口方便测试."""
+        if self._mode != "test":
+            return None
+        win = tk.Toplevel(self)
+        win.title("题目选择")
+        win.configure(bg=theme.BG)
+        win.transient(self.winfo_toplevel())
+        center_window(win, 720, 560)
+
+        tk.Label(win, text="点题号直接跳过去", bg=theme.BG, fg=theme.MUTED,
+                 font=theme.f(10)).pack(anchor="w", padx=16, pady=(12, 4))
+
+        sc = ScrollFrame(win)
+        sc.pack(fill="both", expand=True, padx=14, pady=(0, 8))
+        body = sc.body
+
+        answered = sum(1 for v in self.results.values() if v is not None)
+        total = sum(len(s["items"]) for s in self.sections)
+        tk.Label(win, text=f"已判定 {answered}/{total}", bg=theme.BG, fg=theme.MUTED,
+                 font=theme.f(10)).pack(side="left", padx=16, pady=(0, 10))
+        FlatButton(win, "关闭", win.destroy, bg=theme.CARD, font=theme.f(11),
+                   padx=16, pady=6).pack(side="right", padx=14, pady=(0, 8))
+
+        for si, sec in enumerate(self.sections):
+            row = tk.Frame(body, bg=theme.BG)
+            row.pack(fill="x", pady=(6, 2), padx=4)
+            tk.Label(row, text=f"{sec['no']}、{sec['title']}",
+                     bg=theme.BG, fg=theme.TEXT, font=theme.f(11, "bold"),
+                     anchor="w").pack(fill="x")
+            grid = tk.Frame(body, bg=theme.BG)
+            grid.pack(fill="x", padx=4, pady=(0, 4))
+            per = 12
+            for i, it in enumerate(sec["items"]):
+                ok = self.results.get(it["id"])
+                if ok is True:
+                    bg, fg = theme.SUCCESS_SOFT, theme.SUCCESS
+                elif ok is False:
+                    bg, fg = theme.ERROR_SOFT, theme.ERROR
+                else:
+                    bg, fg = theme.CARD, theme.MUTED
+                cell = FlatButton(grid, str(i + 1),
+                                  lambda s=si, k=i: self._jump(s, k),
+                                  bg=bg, fg=fg, hover=theme.BLUE_SOFT,
+                                  active_bg=theme.BLUE_SOFT, font=theme.f(10, "bold"),
+                                  padx=0, pady=6, width=44)
+                cell.grid(row=i // per, column=i % per, padx=3, pady=3)
+        return win
+
+    def _jump(self, sec_i: int, item_i: int) -> None:
+        if not 0 <= sec_i < len(self.sections):
+            return
+        self._clear_after()
+        self.sec_i = sec_i
+        self.item_i = item_i
+        self.foot_btn.pack_forget()
+        self._render_section()
+        self._update_progress()
+
+    def _confirm_finish(self) -> None:
+        left = sum(len(s["items"]) for s in self.sections) - len(self.results)
+        if left > 0 and not messagebox.askyesno(
+                "交卷", f"还有 {left} 题没判定，现在交卷吗？", parent=self):
+            return
+        self._finish()
 
     # ------------------------------------------------------------ 生命周期
     def on_show(self, lesson: int | None = None, resume: bool = False,
@@ -171,6 +336,7 @@ class MinnaTestFrame(tk.Frame):
         self.title.configure(text=f"第 {lesson} 课" if not les.get("title")
                              else str(les["title"]))
         self.timer_cap.configure(text="剩余" if self.limit_min else "用时")
+        self._audio_load(les.get("audio"))
         self.timer.pack(side="right", padx=(10, 0))
         self._tick()
         self._render_section()
@@ -242,6 +408,16 @@ class MinnaTestFrame(tk.Frame):
         done = len(self.results)
         self.progress_bar.place(relwidth=min(1.0, done / total))
         self.sub.configure(text=f"{done}/{total} 已判定")
+        self._sync_submit()
+
+    def _sync_submit(self) -> None:
+        """全部判定完才把【交卷】摆出来 (试卷回顾模式不显示)."""
+        total = sum(len(s["items"]) for s in self.sections)
+        if self._mode == "test" and total and len(self.results) >= total:
+            if not self.submit_btn.winfo_ismapped():
+                self.submit_btn.pack(side="right", padx=(8, 0))
+        else:
+            self.submit_btn.pack_forget()
 
     # ------------------------------------------------------------ 渲染分发
     def _clear_body(self) -> None:
@@ -793,6 +969,7 @@ class MinnaTestFrame(tk.Frame):
 
     # ---------------------------------------------------------- 交卷
     def _finish(self) -> None:
+        self._audio_stop()
         self._clear_after()
         total = sum(len(s["items"]) for s in self.sections)
         score = sum(1 for v in self.results.values() if v)
@@ -936,6 +1113,7 @@ class MinnaTestFrame(tk.Frame):
 
     # ---------------------------------------------------------- 退出
     def _leave(self) -> None:
+        self._audio_stop()
         if self._mode == "test" and self.results:
             self._save_cursor()
             self.app.db.minna_save_cursor(

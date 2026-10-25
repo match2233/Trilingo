@@ -66,6 +66,7 @@ class ExamPickerFrame(tk.Frame):
         title = tk.Frame(left, bg=theme.CARD)
         title.pack(anchor="w")
         tag, fg, soft = KIND_TAG.get(meta.get("kind"), ("试卷", theme.MUTED, theme.BG))
+        # 标签用 soft 底色, 悬停时不变色 (只改 CARD 色的容器)
         tk.Label(title, text=tag, bg=soft, fg=fg, font=theme.f(9, "bold"),
                  padx=6).pack(side="left", padx=(0, 8))
         tk.Label(title, text=meta["name"], bg=theme.CARD, fg=theme.TEXT,
@@ -79,9 +80,29 @@ class ExamPickerFrame(tk.Frame):
         tk.Label(left, text=sub, bg=theme.CARD, fg=theme.MUTED,
                  font=theme.f(11)).pack(anchor="w", pady=(4, 0))
 
-        FlatButton(inner, "进入", lambda c=meta["id"]: self._enter(c),
-                   bg=theme.CARD, hover=soft, active_bg=soft, fg=fg,
-                   font=theme.f(12, "bold"), padx=20, pady=8).pack(side="right")
+        tk.Label(inner, text="›", bg=theme.CARD, fg=theme.MUTED,
+                 font=theme.f(22)).pack(side="right", padx=(8, 6))
+
+        # 整张卡片都能点: 递归绑事件, 悬停时把 CARD 色的容器染成淡色底
+        def tint(widget, on: bool) -> None:
+            if isinstance(widget, (tk.Frame, tk.Label)) and \
+                    str(widget.cget("bg")) in (theme.CARD, theme.PRIMARY_SOFT):
+                widget.configure(bg=theme.PRIMARY_SOFT if on else theme.CARD)
+            for ch in widget.winfo_children():
+                tint(ch, on)
+
+        def bind(widget, cid=meta["id"]):
+            try:
+                widget.configure(cursor="hand2")
+            except tk.TclError:
+                pass
+            widget.bind("<Button-1>", lambda e, c=cid: self._enter(c))
+            widget.bind("<Enter>", lambda e: tint(card, True))
+            widget.bind("<Leave>", lambda e: tint(card, False))
+            for ch in widget.winfo_children():
+                bind(ch, cid)
+
+        bind(card)
 
     # ------------------------------------------------------------ 动作
     def _enter(self, cid: str) -> None:

@@ -1,7 +1,11 @@
-"""把每道题的**题干**从 PDF 页面裁成图片, 保留原卷的下划线/加粗/红色.
+﻿"""把每道题的**题干**从 PDF 页面裁成图片, 保留原卷的下划线/加粗/红色.
 
 为什么: 这些试卷是扫描件, 富文本信息只存在于图像里 —— OCR 出来的是纯文字,
 下划线、加粗、标红的被考词全丢了。裁题干当图片显示就原样还原了。
+
+关键: **只裁这一行文字自己的横向范围**, 不要整页宽。
+整页宽裁下来 (约 1200px) 压到 900px 显示, 字只剩 30px 高, 看着很小;
+按文字实际宽度裁, 同样的显示宽度下字就大得多, 和选项字号相当。
 
 用法:
     python tools/crop_prompts.py <pdf> --ocr x.ocr.json --questions q.json \
@@ -18,8 +22,11 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-SCALE = 2.2          # 与 ocr_paper.py 默认一致, OCR 坐标即渲染图坐标
-PAD_Y = 6
+RENDER = 4.5        # 重新渲染的倍率 (清晰度)
+OCR_SCALE = 2.2     # ocr_paper.py 用的倍率, OCR 坐标基于它
+PAD_X = 6
+PAD_Y = 8
+LINE_H = 34         # 一行文字高度 (OCR 坐标)
 
 
 def norm(s: str) -> str:
@@ -44,39 +51,42 @@ def main() -> int:
         ROOT / "data" / "exams" / a.collection / "prompts")
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # 把 OCR 行按"规范化文字"建索引, 同时记住它属于哪一页、y、高度
-    index: list[tuple[str, int, float, float]] = []
+    index = []
     for page in ocr["items"]:
         for ln in page["lines"]:
-            index.append((norm(ln["text"]), page["page"], float(ln["y"]), 30.0))
+            index.append((norm(ln["text"]), page["page"], float(ln["y"]),
+                          float(ln["x"]), float(ln["x2"])))
 
     doc = pdfium.PdfDocument(str(a.pdf))
-    rendered: dict[int, object] = {}
+    cache: dict[int, object] = {}
     made = 0
     for q in qdata.get("questions") or []:
         target = norm(q["prompt"])[:12]
         if not target:
             continue
-        best = None
-        for text, page, y, h in index:
-            if not text:
-                continue
-            if target in text or text.startswith(target) or \
-                    (len(text) > 6 and text[:8] == target[:8]):
-                best = (page, y, h)
+        hit = None
+        for text, page, y, x, x2 in index:
+            if text and (target in text or text.startswith(target)
+                         or (len(text) > 6 and text[:8] == target[:8])):
+                hit = (page, y, x, x2)
                 break
-        if best is None:
+        if hit is None:
             continue
-        page_no, y, _ = best
-        img = rendered.get(page_no)
+        page_no, y, x, x2 = hit
+        img = cache.get(page_no)
         if img is None:
-            img = doc[page_no - 1].render(scale=SCALE).to_pil()
-            rendered[page_no] = img
+            img = doc[page_no - 1].render(scale=RENDER).to_pil()
+            cache[page_no] = img
+        k = RENDER / OCR_SCALE
         W, H = img.size
-        y0 = int(max(0, y - PAD_Y))
-        y1 = int(min(H, y + 30))   # 只到这一行文字底边, 别把下面选项行带进来
+        x0 = int(max(0, (x - PAD_X) * k))
+        x1 = int(min(W, (x2 + PAD_X) * k))
+        y0 = int(max(0, (y - PAD_Y) * k))
+        y1 = int(min(H, (y - PAD_Y + LINE_H) * k))
+        if x1 - x0 < 120:
+            x1 = min(W, x0 + 480)
         name = f"p{a.paper:02d}-q{q['no']:03d}.png"
-        img.crop((int(W * 0.03), y0, int(W * 0.97), y1)).save(out_dir / name)
+        img.crop((x0, y0, x1, y1)).save(out_dir / name)
         q["prompt_image"] = f"exams/{a.collection}/prompts/{name}"
         made += 1
 

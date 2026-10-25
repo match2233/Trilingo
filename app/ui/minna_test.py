@@ -254,29 +254,50 @@ class MinnaTestFrame(tk.Frame):
         FlatButton(win, "关闭", win.destroy, bg=theme.CARD, font=theme.f(11),
                    padx=16, pady=6).pack(side="right", padx=14, pady=(0, 8))
 
+        # 按题型分组: 文字・語彙/文法、読解、聴解
+        groups: dict[str, list[int]] = {}
         for si, sec in enumerate(self.sections):
-            row = tk.Frame(body, bg=theme.BG)
-            row.pack(fill="x", pady=(6, 2), padx=4)
-            tk.Label(row, text=f"{sec['no']}、{sec['title']}",
-                     bg=theme.BG, fg=theme.TEXT, font=theme.f(11, "bold"),
-                     anchor="w").pack(fill="x")
-            grid = tk.Frame(body, bg=theme.BG)
-            grid.pack(fill="x", padx=4, pady=(0, 4))
-            per = 12
-            for i, it in enumerate(sec["items"]):
-                ok = self.results.get(it["id"])
-                if ok is True:
-                    bg, fg = theme.SUCCESS_SOFT, theme.SUCCESS
-                elif ok is False:
-                    bg, fg = theme.ERROR_SOFT, theme.ERROR
-                else:
-                    bg, fg = theme.CARD, theme.MUTED
-                cell = FlatButton(grid, str(i + 1),
-                                  lambda s=si, k=i: self._jump(s, k),
-                                  bg=bg, fg=fg, hover=theme.BLUE_SOFT,
-                                  active_bg=theme.BLUE_SOFT, font=theme.f(10, "bold"),
-                                  padx=0, pady=6, width=44)
-                cell.grid(row=i // per, column=i % per, padx=3, pady=3)
+            groups.setdefault(sec.get("group") or "文字・語彙・文法", []).append(si)
+
+        for gname, sec_ids in groups.items():
+            head = tk.Frame(body, bg=theme.BG)
+            head.pack(fill="x", pady=(14, 4), padx=4)
+            n_g = sum(len(self.sections[si]["items"]) for si in sec_ids)
+            tk.Label(head, text=gname, bg=theme.BG, fg=theme.PRIMARY,
+                     font=theme.f(13, "bold"), anchor="w").pack(side="left")
+            tk.Label(head, text=f"  {n_g} 题", bg=theme.BG, fg=theme.MUTED,
+                     font=theme.f(10)).pack(side="left")
+
+            for si in sec_ids:
+                sec = self.sections[si]
+                tk.Label(body, text=f"{sec['no']}、{sec['title']}",
+                         bg=theme.BG, fg=theme.TEXT, font=theme.f(10),
+                         anchor="w").pack(fill="x", padx=8, pady=(4, 2))
+                grid = tk.Frame(body, bg=theme.BG)
+                grid.pack(fill="x", padx=8, pady=(0, 4))
+                per = 12
+                for i, it in enumerate(sec["items"]):
+                    ok = self.results.get(it["id"])
+                    if ok is True:
+                        bg, fg = theme.SUCCESS_SOFT, theme.SUCCESS
+                    elif ok is False:
+                        bg, fg = theme.ERROR_SOFT, theme.ERROR
+                    else:
+                        bg, fg = theme.CARD, theme.MUTED
+                    # 正方形格子 (固定 42x42): 之前用 FlatButton(width=44) 把
+                    # 列撑爆, 一部分题号被挤出可视区, 看起来像"按钮消失"。
+                    cell = tk.Frame(grid, width=42, height=42, bg=bg,
+                                    highlightthickness=1,
+                                    highlightbackground=theme.BORDER,
+                                    cursor="hand2")
+                    cell.grid(row=i // per, column=i % per, padx=2, pady=2)
+                    cell.grid_propagate(False)
+                    lbl = tk.Label(cell, text=str(i + 1), bg=bg, fg=fg,
+                                   font=theme.f(11, "bold"))
+                    lbl.place(relx=0.5, rely=0.5, anchor="center")
+                    for w in (cell, lbl):
+                        w.bind("<Button-1>",
+                               lambda e, s=si, k=i: (self._jump(s, k), win.destroy()))
         return win
 
     def _jump(self, sec_i: int, item_i: int) -> None:

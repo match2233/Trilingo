@@ -1,0 +1,20 @@
+{
+ "collections": [
+  {
+   "id": "minna_l1",
+   "name": "新标日初级上单元测试",
+   "kind": "unit",
+   "base": 1,
+   "file": "minna_l1.json",
+   "desc": "24 课同步测试卷"
+  },
+  {
+   "id": "jlpt_n5",
+   "name": "JLPT-N5",
+   "kind": "jlpt",
+   "base": 1001,
+   "file": "jlpt_n5.json",
+   "desc": "日本语能力试验 N5 历年真题"
+  }
+ ]
+}

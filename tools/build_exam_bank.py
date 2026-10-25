@@ -57,9 +57,10 @@ def main() -> int:
 
     used: list[dict] = []
     missing = 0
-    for q in qs:
+    for idx, q in enumerate(qs, start=1):
         no = int(q["no"])
-        ans = answers.get(no)
+        # 答案按题目顺序给 (题号跨页重复, 不可靠); 兼容老的按题号给的答案表
+        ans = answers.get(idx, answers.get(no) if len(answers) > len(qs) else None)
         if answers and ans is None:
             missing += 1
             continue

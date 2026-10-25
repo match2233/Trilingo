@@ -43,12 +43,13 @@ CORRECT_WAIT_MS = 5000      # 选择题答对后停留多久自动下一题
 
 
 
-def item_image(it: dict, master, bg: str, max_w: int = 520):
+def item_image(it: dict, master, bg: str, max_w: int = 520,
+               key: str = "image"):
     """题目配图 (导入时从 PDF 裁出来的). 没有就返回 None.
 
     图片路径相对 data/ 目录; 文件不在就当没有图, 不显示占位。
     """
-    rel = (it or {}).get("image")
+    rel = (it or {}).get(key)
     if not rel:
         return None
     try:
@@ -642,9 +643,14 @@ class MinnaTestFrame(tk.Frame):
                  fg=theme.BLUE, font=theme.f(11, "bold")).pack(side="left")
         tk.Label(head, text=f"第 {idx + 1} / {len(items)} 小题", bg=theme.CARD,
                  fg=theme.MUTED, font=theme.f(11)).pack(side="right")
-        tk.Label(inner, text=pretty_prompt(it["prompt"]), bg=theme.CARD, fg=theme.TEXT,
-                 font=theme.f(20, "bold"), wraplength=760, justify="left").pack(
-            anchor="w", pady=(0, 16))
+        # 题干: 有原卷截图就显示截图 (保留下划线/加粗/标红), 否则显示文字
+        shot = item_image(it, inner, theme.CARD, max_w=900, key="prompt_image")
+        if shot is not None:
+            shot.pack(anchor="w", pady=(0, 16))
+        else:
+            tk.Label(inner, text=pretty_prompt(it["prompt"]), bg=theme.CARD,
+                     fg=theme.TEXT, font=theme.f(20, "bold"), wraplength=760,
+                     justify="left").pack(anchor="w", pady=(0, 16))
         pic = item_image(it, inner, theme.CARD)
         if pic is not None:
             pic.pack(anchor="w", pady=(0, 12))

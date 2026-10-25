@@ -1392,7 +1392,8 @@
         "ぜんしゅ",
         "ぜんしゅうい"
        ],
-       "answer": 2
+       "answer": 2,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q001.png"
       },
       {
        "id": "Q03-S1-2",
@@ -1414,7 +1415,8 @@
         "まって",
         "たって"
        ],
-       "answer": 1
+       "answer": 1,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q003.png"
       },
       {
        "id": "Q03-S1-4",
@@ -1425,7 +1427,8 @@
         "いけ",
         "うみ"
        ],
-       "answer": 2
+       "answer": 2,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q004.png"
       },
       {
        "id": "Q03-S1-5",
@@ -1447,7 +1450,8 @@
         "がっこう",
         "がっこお"
        ],
-       "answer": 3
+       "answer": 3,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q006.png"
       },
       {
        "id": "Q03-S1-7",
@@ -1458,7 +1462,8 @@
         "ろっぽん",
         "ろくぽん"
        ],
-       "answer": 3
+       "answer": 3,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q007.png"
       },
       {
        "id": "Q03-S1-8",
@@ -1469,7 +1474,8 @@
         "しむん",
         "しんぷん"
        ],
-       "answer": 2
+       "answer": 2,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q008.png"
       },
       {
        "id": "Q03-S1-9",
@@ -1491,7 +1497,8 @@
         "そと",
         "にわ"
        ],
-       "answer": 3
+       "answer": 3,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q010.png"
       }
      ]
     },
@@ -1520,7 +1527,8 @@
         "車",
         "真"
        ],
-       "answer": 3
+       "answer": 3,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q013.png"
       },
       {
        "id": "Q03-S2-3",
@@ -1531,7 +1539,8 @@
         "1000冊",
         "1000円"
        ],
-       "answer": 4
+       "answer": 4,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q014.png"
       },
       {
        "id": "Q03-S2-4",
@@ -1542,7 +1551,8 @@
         "会いました。",
         "話いました。"
        ],
-       "answer": 3
+       "answer": 3,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q017.png"
       },
       {
        "id": "Q03-S2-5",
@@ -1575,7 +1585,8 @@
         "あかるい",
         "くらい"
        ],
-       "answer": 1
+       "answer": 1,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q022.png"
       },
       {
        "id": "Q03-S2-8",
@@ -1597,7 +1608,8 @@
         "てがみ",
         "きっぷ"
        ],
-       "answer": 2
+       "answer": 2,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q024.png"
       },
       {
        "id": "Q03-S2-10",
@@ -1659,7 +1671,8 @@
         "よるはいつもくにのかぞくにでんわします",
         "あさはいつもくにのかぞくにでんわします"
        ],
-       "answer": 3
+       "answer": 3,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q029.png"
       },
       {
        "id": "Q03-S3-5",
@@ -1670,7 +1683,8 @@
         "このまちにはゆうめいなケーキがあります",
         "このまちにはゆうめいなこうえんがあります"
        ],
-       "answer": 1
+       "answer": 1,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q030.png"
       },
       {
        "id": "Q03-S3-6",
@@ -1681,7 +1695,8 @@
         "そのえいがはみじかかったです",
         "そのえいがはながかったです"
        ],
-       "answer": 2
+       "answer": 2,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q031.png"
       },
       {
        "id": "Q03-S3-7",
@@ -1703,7 +1718,8 @@
         "きょねんきょうとへいきました",
         "おととしきょうとへいきました"
        ],
-       "answer": 4
+       "answer": 4,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q033.png"
       },
       {
        "id": "Q03-S3-9",
@@ -1714,7 +1730,8 @@
         "と",
         "が"
        ],
-       "answer": 3
+       "answer": 3,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q002.png"
       },
       {
        "id": "Q03-S3-10",
@@ -1725,7 +1742,8 @@
         "で",
         "は"
        ],
-       "answer": 3
+       "answer": 3,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q005.png"
       }
      ]
     },
@@ -1743,7 +1761,8 @@
         "ごろ",
         "も"
        ],
-       "answer": 1
+       "answer": 1,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q008.png"
       },
       {
        "id": "Q03-S4-2",
@@ -1776,7 +1795,8 @@
         "あとに",
         "のあとに"
        ],
-       "answer": 1
+       "answer": 1,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q011.png"
       },
       {
        "id": "Q03-S4-5",
@@ -1820,7 +1840,8 @@
         "だれか",
         "だれかで"
        ],
-       "answer": 3
+       "answer": 3,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q015.png"
       },
       {
        "id": "Q03-S4-9",
@@ -1831,7 +1852,8 @@
         "は",
         "に"
        ],
-       "answer": 2
+       "answer": 2,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q017.png"
       },
       {
        "id": "Q03-S4-10",
@@ -1860,7 +1882,8 @@
         "が",
         "から"
        ],
-       "answer": 1
+       "answer": 1,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q020.png"
       },
       {
        "id": "Q03-S5-2",
@@ -1893,7 +1916,8 @@
         "行っていましたか",
         "行っていませんか"
        ],
-       "answer": 2
+       "answer": 2,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q023.png"
       },
       {
        "id": "Q03-S5-5",
@@ -1937,7 +1961,8 @@
         "中川先生にかえします",
         "山口先生の机の上におきます"
        ],
-       "answer": 3
+       "answer": 3,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q029.png"
       },
       {
        "id": "Q03-S5-9",
@@ -1948,7 +1973,8 @@
         "とてもつかれたから",
         "かさがなかったから"
        ],
-       "answer": 4
+       "answer": 4,
+       "prompt_image": "exams/jlpt-n5/prompts/p03-q080.png"
       },
       {
        "id": "Q03-S5-10",

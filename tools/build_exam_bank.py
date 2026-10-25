@@ -74,12 +74,15 @@ def main() -> int:
                "answer": ans}
         if q.get("image"):
             rec["image"] = q["image"]
+        if q.get("prompt_image"):
+            rec["prompt_image"] = q["prompt_image"]
         used.append(rec)
 
     sections = []
     for i in range(0, len(used), args.size):
         chunk = used[i:i + args.size]
-        lo, hi = chunk[0]["no"], chunk[-1]["no"]
+        # 标题按**题目顺序**编号: OCR 的卷面题号跨页重复且乱序 (出现"第26–5题")
+        lo, hi = i + 1, i + len(chunk)
         sections.append({
             "no": len(sections) + 1,
             "title": f"第 {lo}–{hi} 题" if lo != hi else f"第 {lo} 题",
@@ -90,6 +93,8 @@ def main() -> int:
                 "options": it["options"],
                 "answer": it["answer"],
                 **({"image": it["image"]} if it.get("image") else {}),
+                **({"prompt_image": it["prompt_image"]}
+                   if it.get("prompt_image") else {}),
             } for j, it in enumerate(chunk)],
         })
 

@@ -12,6 +12,17 @@
 import * as Llm from './llm.js';
 
 const CORRECT_WAIT = 5000;
+/* 对话型题干按说话人分行: 原卷把 A/B 挤成一行, 又长又难读。
+   只在确实有两个以上说话人时才断行, 普通句子原样返回。 */
+const SPEAKER = /(?<=[\s。、！？…」』）)])[ \t]*([A-DＡ-Ｄ][:：])/g;
+function prettyPrompt(text) {
+  const t = String(text || '');
+  if (!SPEAKER.test(t)) return esc(t);
+  SPEAKER.lastIndex = 0;
+  const broken = t.trim().replace(SPEAKER, '\n$1');
+  return esc(broken).replace(/\n/g, '<br>');
+}
+
 const KIND_NAME = { fill: '填空', choice: '选择', translate: '翻译' };
 
 export const M = {
@@ -405,7 +416,7 @@ function renderFill(sec) {
   const cells = sec.items.map((it, i) => `
     <div class="fill-cell">
       <div class="fn">${i + 1}</div>
-      <div>${esc(it.prompt)}</div>
+      <div>${prettyPrompt(it.prompt)}</div>
       <div class="fill-ans" data-ans="${i}"></div>
       <button class="fill-toggle" data-tog="${i}" style="display:none">对</button>
     </div>`).join('');
@@ -473,7 +484,7 @@ function renderChoice(sec) {
   $('mtBody').innerHTML = `
     <div class="mt-card">
       <div class="sub">${sec.no}、${esc(sec.title)}　·　第 ${idx + 1} / ${sec.items.length} 小题</div>
-      <div class="mt-prompt">${esc(it.prompt)}</div>
+      <div class="mt-prompt">${prettyPrompt(it.prompt)}</div>
       ${opts}
       <div id="chHint" class="sub"></div>
       ${known ? '' : '<div class="mt-judge"><button class="yes" id="sjYes">对</button><button class="no" id="sjNo">错</button></div>'}
@@ -549,7 +560,7 @@ function renderTranslate(sec) {
   $('mtBody').innerHTML = `
     <div class="mt-card">
       <div class="sub">${sec.no}、${esc(sec.title)}　·　第 ${idx + 1} / ${sec.items.length} 小题</div>
-      <div class="mt-prompt">${esc(it.prompt)}</div>
+      <div class="mt-prompt">${prettyPrompt(it.prompt)}</div>
       <div class="sub" style="margin:12px 0 6px">请写出${toJp ? '日语' : '汉语'}的译文：</div>
       <textarea id="trInput" rows="3"></textarea>
       <div class="mt-judge" style="margin-top:12px">
@@ -670,7 +681,7 @@ function renderPaper(justFinished) {
       if (sec.kind === 'fill') {
         const ans = it.answer || '—';
         return `<div class="paper-cell${bad}">${star}<b>${i + 1}</b>`
-          + `<span class="pq">${esc(it.prompt)}</span>`
+          + `<span class="pq">${prettyPrompt(it.prompt)}</span>`
           + `<span class="pa">${esc(ans)}</span></div>`;
       }
       if (sec.kind === 'choice') {
@@ -680,14 +691,14 @@ function renderPaper(justFinished) {
           ? `(${marks[it.answer - 1] || it.answer})` : '';
         return `<div class="paper-line choice${bad}">${star}`
           + `<span class="pno">${i + 1}.</span>`
-          + `<span class="pq">${esc(it.prompt)}</span>`
+          + `<span class="pq">${prettyPrompt(it.prompt)}</span>`
           + `<span class="pa">${bad ? '✗ ' : ''}${want}</span>`
           + `<span class="popt">${opts}</span></div>`;
       }
       // 翻译: 题干一行, 译文单独一行
       return `<div class="paper-line trans${bad}">`
         + `<div class="thead">${star}<span class="pno">${i + 1}.</span>`
-        + `<span class="pq">${esc(it.prompt)}</span></div>`
+        + `<span class="pq">${prettyPrompt(it.prompt)}</span></div>`
         + `<span class="pa">${bad ? '✗ ' : ''}${esc(it.answer || '—')}</span></div>`;
     }).join('');
     const cls = sec.kind === 'fill' ? 'paper-fill' : 'paper-rows';

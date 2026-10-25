@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import re
 import threading
 import tkinter as tk
 from tkinter import messagebox
@@ -18,6 +19,25 @@ from tkinter import messagebox
 from .. import llm, minna
 from . import theme
 from .widgets import Card, FlatButton, ScrollFrame
+
+# 对话型题干里说话人的标记: "A:" "B:" "Ａ：" —— 前面通常跟空格或句末标点
+_SPEAKER = re.compile(r"(?<=[\s。、！？…」』）)])[ \t]*([A-DＡ-Ｄ][:：])")
+
+
+def pretty_prompt(text: str) -> str:
+    """把对话型题干按说话人分行.
+
+    原卷把对话挤成一行, 例如 "A: キムさんは 会社員では ありませんか。
+    B: はい、会社員＿＿。"。整行排下来又长又难读, 在第二个说话人前面
+    断行会清楚很多。只在确实有两个以上说话人时才动, 普通句子原样返回。
+    """
+    if not text:
+        return text
+    hits = _SPEAKER.findall(text)
+    if len(hits) < 1:
+        return text
+    out = _SPEAKER.sub(lambda m: "\n" + m.group(1), text.strip())
+    return out
 
 CORRECT_WAIT_MS = 5000      # 选择题答对后停留多久自动下一题
 
@@ -387,7 +407,7 @@ class MinnaTestFrame(tk.Frame):
                  fg=theme.BLUE, font=theme.f(11, "bold")).pack(side="left")
         tk.Label(head, text=f"第 {idx + 1} / {len(items)} 小题", bg=theme.CARD,
                  fg=theme.MUTED, font=theme.f(11)).pack(side="right")
-        tk.Label(inner, text=it["prompt"], bg=theme.CARD, fg=theme.TEXT,
+        tk.Label(inner, text=pretty_prompt(it["prompt"]), bg=theme.CARD, fg=theme.TEXT,
                  font=theme.f(20, "bold"), wraplength=760, justify="left").pack(
             anchor="w", pady=(0, 16))
 
@@ -462,7 +482,7 @@ class MinnaTestFrame(tk.Frame):
                  fg=theme.BLUE, font=theme.f(11, "bold")).pack(side="left")
         tk.Label(head, text=f"第 {idx + 1} / {len(items)} 小题", bg=theme.CARD,
                  fg=theme.MUTED, font=theme.f(11)).pack(side="right")
-        tk.Label(inner, text=it["prompt"], bg=theme.CARD, fg=theme.TEXT,
+        tk.Label(inner, text=pretty_prompt(it["prompt"]), bg=theme.CARD, fg=theme.TEXT,
                  font=theme.f(20, "bold"), wraplength=780, justify="left").pack(
             anchor="w", pady=(0, 14))
 
@@ -788,37 +808,47 @@ class MinnaTestFrame(tk.Frame):
                     bad = ok is False
                     line = tk.Frame(body, bg=theme.SUNK)
                     line.pack(fill="x", pady=1)
-                    self._star(line, it).pack(side="left", padx=(0, 4))
-                    tk.Label(line, text=f"{i + 1}.", bg=theme.SUNK, fg=theme.MUTED,
+
+                    # 第一行: ☆ 序号 题干 ……… 正确项
+                    head = tk.Frame(line, bg=theme.SUNK)
+                    head.pack(fill="x", padx=8, pady=(4, 0))
+                    self._star(head, it).pack(side="left", padx=(0, 4))
+                    tk.Label(head, text=f"{i + 1}.", bg=theme.SUNK, fg=theme.MUTED,
                              font=theme.f(10), width=3, anchor="ne").pack(side="left")
-                    txt = it["prompt"]
-                    tk.Label(line, text=txt, bg=theme.SUNK,
-                             fg=theme.ERROR if bad else theme.TEXT,
-                             font=theme.f(12), wraplength=int(width * 0.42),
-                             justify="left", anchor="w").pack(side="left")
                     ans = it.get("answer")
                     if sec["kind"] == "choice" and isinstance(ans, int):
-                        opts = it.get("options") or []
-                        opt_txt = "  ".join(
-                            f"{'①②③④'[j] if j < 4 else j + 1}{o}"
-                            for j, o in enumerate(opts))
-                        tk.Label(line, text=opt_txt, bg=theme.SUNK,
-                                 fg=theme.MUTED, font=theme.f(11),
-                                 wraplength=int(width * 0.46), justify="left",
-                                 anchor="w").pack(side="left", padx=(10, 0))
-                        tk.Label(line, text=f"({'①②③④'[ans - 1] if ans <= 4 else ans})",
+                        tk.Label(head, text=f"({'①②③④'[ans - 1] if ans <= 4 else ans})",
                                  bg=theme.SUNK,
                                  fg=theme.ERROR if bad else theme.BLUE,
                                  font=theme.f(13, "bold")).pack(side="right", padx=(8, 0))
                     else:
-                        tk.Label(line, text=ans or "—", bg=theme.SUNK,
+                        tk.Label(head, text=ans or "—", bg=theme.SUNK,
                                  fg=theme.ERROR if bad else theme.BLUE,
                                  font=theme.f(12, "bold"),
-                                 wraplength=int(width * 0.5), justify="left",
-                                 anchor="w").pack(side="right", padx=(8, 0))
+                                 wraplength=int(width * 0.55), justify="right",
+                                 anchor="e").pack(side="right", padx=(8, 0))
                     if bad:
-                        tk.Label(line, text="✗", bg=theme.SUNK, fg=theme.ERROR,
+                        tk.Label(head, text="✗", bg=theme.SUNK, fg=theme.ERROR,
                                  font=theme.f(11, "bold")).pack(side="right")
+                    # 题干独占剩余宽度, 对话按说话人换行
+                    tk.Label(head, text=pretty_prompt(it["prompt"]), bg=theme.SUNK,
+                             fg=theme.ERROR if bad else theme.TEXT,
+                             font=theme.f(12), wraplength=max(220, int(width * 0.55)),
+                             justify="left", anchor="w").pack(
+                        side="left", fill="x", expand=True)
+
+                    # 第二行: 选项 (选择题才有)
+                    if sec["kind"] == "choice":
+                        opts = it.get("options") or []
+                        opt_txt = "　".join(
+                            f"{'①②③④'[j] if j < 4 else j + 1}{o}"
+                            for j, o in enumerate(opts))
+                        tk.Label(line, text=opt_txt, bg=theme.SUNK,
+                                 fg=theme.MUTED, font=theme.f(11),
+                                 wraplength=max(260, width - 90), justify="left",
+                                 anchor="w").pack(fill="x", padx=(38, 10), pady=(0, 4))
+                    else:
+                        tk.Frame(line, bg=theme.SUNK, height=4).pack()
         sc.scroll_to_top()
 
         # 底部: 返回列表 / 重做

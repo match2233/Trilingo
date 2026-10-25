@@ -49,13 +49,27 @@ def page_text(page: dict) -> str:
     return "\n".join(out)
 
 
-def ask(page: dict) -> list[dict]:
+READING_SYSTEM = """你在把日语能力考（JLPT）**読解部分**的 OCR 结果还原成题目。
+
+这一页可能有文章（本文）和若干道四选一题。请输出：
+{"questions":[{"no":1,"passage":"文章","prompt":"第几問的题目","options":["A","B","C","D"]}]}
+
+规则：
+1. 每题恰好 4 个选项；凑不齐的不要输出。
+2. `passage` 填这道题对应的文章（同一篇文章的多道题，passage 可以重复填）。
+   文章原样照抄 OCR，**不要改写、不要翻译**；太长可以只保留与题目相关的部分。
+3. `prompt` 只写问题本身（如「この文章によると、…はどれですか」）。
+4. 只在**确实是阅读题**时才输出；只有文章没有问题就输出 {"questions":[]}。
+5. 只输出 JSON。"""
+
+
+def ask(page: dict, mode: str = "normal") -> list[dict]:
     cfg = llm.load_config()
     url = cfg["base_url"].rstrip("/") + "/chat/completions"
     payload = {
         "model": cfg["model"],
         "messages": [
-            {"role": "system", "content": SYSTEM},
+            {"role": "system", "content": READING_SYSTEM if mode == "reading" else SYSTEM},
             {"role": "user", "content": f"第 {page['page']} 页：\n\n{page_text(page)}"},
         ],
         "response_format": {"type": "json_object"},
@@ -94,6 +108,7 @@ def main() -> int:
     ap.add_argument("ocr")
     ap.add_argument("--out", default="")
     ap.add_argument("--pages", default="")
+    ap.add_argument("--mode", default="normal", choices=("normal", "reading"))
     args = ap.parse_args()
 
     data = json.loads(pathlib.Path(args.ocr).read_text(encoding="utf-8"))
@@ -107,7 +122,7 @@ def main() -> int:
     seq = 0
     for page in pages:
         try:
-            qs = ask(page)
+            qs = ask(page, args.mode)
         except Exception as exc:      # noqa: BLE001
             print(f"  第 {page['page']} 页失败: {exc}")
             continue
@@ -125,6 +140,7 @@ def main() -> int:
                 "prompt": str(q["prompt"]).strip(),
                 "options": [str(o).strip() for o in q["options"]],
                 "figure": bool(q.get("figure")),
+                **({"passage": str(q["passage"]).strip()} if q.get("passage") else {}),
             })
             kept += 1
         print(f"  第 {page['page']} 页: 收 {kept} / {len(qs)}")

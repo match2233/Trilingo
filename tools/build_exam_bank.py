@@ -49,6 +49,8 @@ def main() -> int:
     ap.add_argument("--answers", default="")
     ap.add_argument("--out", default="")
     ap.add_argument("--size", type=int, default=10, help="每个大题多少题")
+    ap.add_argument("--append", action="store_true",
+                    help="追加到已存在的这套卷子, 而不是覆盖")
     args = ap.parse_args()
 
     qs = json.loads(pathlib.Path(args.questions).read_text(encoding="utf-8"))
@@ -64,7 +66,11 @@ def main() -> int:
         if answers and ans is None:
             missing += 1
             continue
-        rec = {"no": no, "prompt": q["prompt"], "options": q["options"],
+        prompt = q["prompt"]
+        if q.get("passage"):
+            # 読解: 把文章放在题干前面, 用分隔标记, 界面照常换行显示
+            prompt = f'【文章】{q["passage"]}\n【問】{prompt}'
+        rec = {"no": no, "prompt": prompt, "options": q["options"],
                "answer": ans}
         if q.get("image"):
             rec["image"] = q["image"]
@@ -104,6 +110,17 @@ def main() -> int:
             pass
     bank.setdefault("meta", META.get(args.collection, {"id": args.collection}))
     lessons = [l for l in bank.get("lessons") or [] if l.get("lesson") != args.paper]
+    if args.append:
+        old = [l for l in bank.get("lessons") or [] if l.get("lesson") == args.paper]
+        if old:
+            base = old[0]
+            off = len(base["sections"])
+            for s in sections:
+                s["no"] = s["no"] + off
+                for j, it in enumerate(s["items"], start=1):
+                    it["id"] = f"Q{args.paper:02d}-S{s['no']}-{j}"
+            lesson = dict(base)
+            lesson["sections"] = base["sections"] + sections
     lessons.append(lesson)
     lessons.sort(key=lambda l: l["lesson"])
     bank["lessons"] = lessons

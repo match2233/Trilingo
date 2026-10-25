@@ -40,3 +40,8 @@ __pycache__/
 venv/
 env/
 .pytest_cache/
+
+# ── OCR 模型 (3.4MB, 由 tools/fetch_ocr_models.py 下载) ──
+data/ocr/japan_rec.onnx
+data/ocr/japan_dict.txt
+data/ocr/_p*.png

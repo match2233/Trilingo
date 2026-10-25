@@ -26,6 +26,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 TMP = ROOT / "data" / "ocr"
+RENDER_L = 2.6   # 听力页面渲染倍率
 
 
 def flatten(table: dict) -> list[int]:
@@ -173,35 +174,94 @@ def main() -> int:
         sections.append({"no": si, "title": f"{section}（{len(items)} 题）",
                          "kind": "choice", "group": group, "items": items})
 
-    # 聴解: 每一番一题, 配所在页的整页图
+    # 聴解: 每一番裁一块图 (按"番"切, 不是整页)
     lis = answers.get("聴解") or {}
     lis_pages = parse_range(a.listening_pages)
     import pypdfium2 as pdfium
 
     doc = pdfium.PdfDocument(str(pdf))
-    page_imgs: dict[int, str] = {}
-    for idx, pg in enumerate(lis_pages):
-        name = f"p{a.paper:02d}-listen-p{pg}.png"
-        path = out_root / "img" / name
-        if not path.exists():
-            doc[pg - 1].render(scale=2.4).to_pil().save(path)
-        page_imgs[pg] = f"exams/{a.collection}/img/{name}"
 
-    for gidx, (gname, values) in enumerate(
-            sorted(lis.items(), key=lambda kv: int("".join(c for c in kv[0] if c.isdigit()) or 0))):
-        pg = lis_pages[min(gidx, len(lis_pages) - 1)]
+    def bands_of(img, min_h=90, gap=16):
+        """按横向全白的分隔行切出"行带"."""
+        import numpy as np
+        g = np.asarray(img.convert("L"))
+        H, W = g.shape
+        prof = g[:, int(W * 0.03):int(W * 0.97)].min(axis=1)
+        has = prof < 205
+        out, start, blank = [], None, 0
+        for y in range(H):
+            if has[y]:
+                if start is None:
+                    start = y
+                blank = 0
+            elif start is not None:
+                blank += 1
+                if blank >= gap:
+                    if y - blank + 1 - start >= min_h:
+                        out.append((start, y - blank + 1))
+                    start, blank = None, 0
+        if start is not None and H - start >= min_h:
+            out.append((start, H))
+        return out
+
+    def force_count(bs, need):
+        """把行带数量强行调成 need: 多了合并最近的, 少了拆最高的."""
+        bs = list(bs)
+        while len(bs) > need:
+            gaps = [(bs[i + 1][0] - bs[i][1], i) for i in range(len(bs) - 1)]
+            _, i = min(gaps)
+            bs[i] = (bs[i][0], bs[i + 1][1])
+            del bs[i + 1]
+        # 不够时就别硬拆 —— 拆分只会得到 90px 的残图; 宁可相邻两题共用一块
+        return bs
+
+    groups = sorted(lis.items(),
+                    key=lambda kv: int("".join(c for c in kv[0] if c.isdigit()) or 0))
+    total_need = sum(len(v) for _k, v in groups)
+    pages_img = [doc[pg - 1].render(scale=RENDER_L) for pg in lis_pages]
+    pages_img = [im.to_pil() for im in pages_img]
+    per_page = [len(bands_of(im)) for im in pages_img]
+    total_bands = sum(per_page) or 1
+
+    boxes: list[tuple[int, tuple[int, int]]] = []   # (页索引, (y0,y1))
+    remain = total_need
+    for i, im in enumerate(pages_img):
+        last = i == len(pages_img) - 1
+        quota = remain if last else max(1, round(remain * per_page[i] / max(1, sum(per_page[i:]))))
+        quota = min(quota, remain)
+        bs = force_count(bands_of(im), quota)
+        if len(bs) > quota:
+            bs = bs[:quota]
+        for (y0, y1) in bs:
+            boxes.append((i, (y0, y1)))
+        remain -= len(bs)
+
+    si_done = 0
+    for gname, values in groups:
         si += 1
-        items = [{
-            "id": f"Q{a.paper:02d}-S{si}-{i + 1}",
-            "prompt": f"第 {i + 1} 番（{gname}）",
-            "options": ["①", "②", "③", "④"],
-            "answer": ans,
-            "image": page_imgs[pg],
-        } for i, ans in enumerate(values)]
-        sections.append({"no": si, "title": f"聴解 {gname[-1]}（{len(items)} 题）",
-                         "kind": "choice", "group": "聴解", "items": items})
+        items = []
+        for i, ans in enumerate(values):
+            # 块比题少时, 后面的题共用最后一块 (不造假图)
+            pi, (y0, y1) = boxes[min(si_done, len(boxes) - 1)]
+            im = pages_img[pi]
+            W, H = im.size
+            name = f"p{a.paper:02d}-l{si_done + 1:02d}.png"
+            im.crop((int(W * 0.03), max(0, y0 - 8),
+                     int(W * 0.97), min(H, y1 + 8))).save(out_root / "img" / name)
+            items.append({
+                "id": f"Q{a.paper:02d}-S{si}-{i + 1}",
+                "prompt": f"第 {i + 1} 番（{gname}）",
+                "options": ["①", "②", "③", "④"],
+                "answer": ans,
+                "image": f"exams/{a.collection}/img/{name}",
+            })
+            si_done += 1
+        if items:
+            sections.append({"no": si,
+                             "title": f"聴解 {gname[-1]}（{len(items)} 题）",
+                             "kind": "choice", "group": "聴解", "items": items})
     if lis:
-        report.append(f"聴解: {sum(len(v) for v in lis.values())} 题, 答案=官方答案表")
+        report.append(f"聴解: {total_need} 题, 按番裁出 {si_done} 块, 答案=官方答案表")
 
     if not sections:
         print("没产出任何题目")

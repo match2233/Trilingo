@@ -57,6 +57,8 @@ def main() -> int:
     ap.add_argument("--minutes", type=int, default=105)
     ap.add_argument("--groups", default="",
                     help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
+    ap.add_argument("--groups", default="",
+                    help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
     a = ap.parse_args()
 
     from app import exams
@@ -133,6 +135,10 @@ def main() -> int:
     if not want:
         want = ["文字・語彙", "文法・読解", "聴解"]
 
+    want = [g.strip() for g in a.groups.split(",") if g.strip()]
+    if not want:
+        want = ["文字・語彙", "文法・読解", "聴解"]
+
     sections: list[dict] = []
     si = 0
     read_pages = parse_range(a.reading_pages)
@@ -141,6 +147,8 @@ def main() -> int:
 
     for section, pages_spec in (("文字・語彙", a.text_pages),
                                 ("文法・読解", a.reading_pages)):
+        if section not in want:
+            continue
         if section not in want:
             continue
         if section == "文法・読解":
@@ -203,6 +211,7 @@ def main() -> int:
                           min(crop.height, int(ys.max()) + pad)))
 
     lis_table = answers.get("聴解") or {}
+    do_lis = "聴解" in want
     do_lis = "聴解" in want
     groups = sorted(lis_table.items(),
                     key=lambda kv: int("".join(c for c in kv[0] if c.isdigit()) or 0))

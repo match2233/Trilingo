@@ -47,6 +47,7 @@ def main() -> int:
     ap.add_argument("--paper", type=int, default=0)
     ap.add_argument("--minutes", type=int, default=105)
     ap.add_argument("--pages", default="1-8")
+    ap.add_argument("--pdf", default="", help="直接指定题目 PDF (套内有多份时用)")
     a = ap.parse_args()
 
     folder = pathlib.Path(a.folder)
@@ -56,7 +57,10 @@ def main() -> int:
         print("没找到题目 PDF")
         return 1
     # 取页数最多的那份当正卷
-    main_pdf = max(usable[0].pdfs, key=lambda p: p.stat().st_size)
+    if a.pdf:
+        main_pdf = pathlib.Path(a.pdf)
+    else:
+        main_pdf = max(usable[0].pdfs, key=lambda p: p.stat().st_size)
     print("正卷:", main_pdf.name)
 
     TMP.mkdir(parents=True, exist_ok=True)

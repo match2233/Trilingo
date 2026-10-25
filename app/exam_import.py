@@ -106,7 +106,10 @@ def _group(folder: Path) -> list[Paper]:
             continue
         suf = p.suffix.lower()
         name = p.name
-        is_answer = bool(re.search(r"答案|解析|听力原文|答题卡", name))
+        # 注意: 「2024年7月能力考N5真题+答案.pdf」这种名字里既有真题又有答案,
+        # 它是**题目卷**; 只按"答案"两个字判断会把它当答案卷, 结果整套漏掉。
+        looks_question = bool(re.search(r"真题|试题|试卷|题目", name))
+        is_answer = bool(re.search(r"答案|解析|听力原文|答题卡", name)) and not looks_question
         if suf in PDF_SUFFIX:
             if is_answer:
                 answers.append(p)

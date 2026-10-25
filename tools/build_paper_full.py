@@ -246,8 +246,20 @@ def main() -> int:
             im = pages_img[pi]
             W, H = im.size
             name = f"p{a.paper:02d}-l{si_done + 1:02d}.png"
-            im.crop((int(W * 0.03), max(0, y0 - 8),
-                     int(W * 0.97), min(H, y1 + 8))).save(out_root / "img" / name)
+            crop = im.crop((int(W * 0.03), max(0, y0 - 8),
+                            int(W * 0.97), min(H, y1 + 8)))
+            # 去掉四周白边, 图在界面里就能放大显示
+            import numpy as _np
+            _g = _np.asarray(crop.convert("L"))
+            _m = _g < 235
+            if _m.any():
+                _ys, _xs = _np.where(_m)
+                pad = 6
+                crop = crop.crop((max(0, int(_xs.min()) - pad),
+                                  max(0, int(_ys.min()) - pad),
+                                  min(crop.width, int(_xs.max()) + pad),
+                                  min(crop.height, int(_ys.max()) + pad)))
+            crop.save(out_root / "img" / name)
             items.append({
                 "id": f"Q{a.paper:02d}-S{si}-{i + 1}",
                 "prompt": f"第 {i + 1} 番（{gname}）",
@@ -277,9 +289,13 @@ def main() -> int:
             bank = json.loads(path.read_text(encoding="utf-8"))
         except Exception:      # noqa: BLE001
             pass
+    old = [l for l in bank.get("lessons") or [] if l.get("lesson") == a.paper]
     lessons = [l for l in bank.get("lessons") or [] if l.get("lesson") != a.paper]
-    lessons.append({"lesson": a.paper, "title": a.title,
-                    "duration_min": a.minutes, "sections": sections})
+    lesson = {"lesson": a.paper, "title": a.title,
+              "duration_min": a.minutes, "sections": sections}
+    if old and old[0].get("audio"):
+        lesson["audio"] = old[0]["audio"]      # 重建不要把听力音频丢掉
+    lessons.append(lesson)
     lessons.sort(key=lambda l: l["lesson"])
     bank["lessons"] = lessons
     bank.setdefault("meta", {"id": a.collection, "name": "JLPT-N5",

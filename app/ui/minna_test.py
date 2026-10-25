@@ -42,6 +42,33 @@ def pretty_prompt(text: str) -> str:
 CORRECT_WAIT_MS = 5000      # 选择题答对后停留多久自动下一题
 
 
+
+def item_image(it: dict, master, bg: str, max_w: int = 520):
+    """题目配图 (导入时从 PDF 裁出来的). 没有就返回 None.
+
+    图片路径相对 data/ 目录; 文件不在就当没有图, 不显示占位。
+    """
+    rel = (it or {}).get("image")
+    if not rel:
+        return None
+    try:
+        from pathlib import Path as _P
+        from PIL import Image, ImageTk
+        from ..config import APP_DIR
+        path = _P(APP_DIR) / "data" / rel
+        if not path.is_file():
+            return None
+        img = Image.open(path)
+        if img.width > max_w:
+            img = img.resize((max_w, int(img.height * max_w / img.width)),
+                             Image.LANCZOS)
+        tkimg = ImageTk.PhotoImage(img)
+        lab = tk.Label(master, image=tkimg, bg=bg, bd=0)
+        lab.image = tkimg          # 必须留引用, 否则会被 GC 掉变成空白
+        return lab
+    except Exception:      # noqa: BLE001
+        return None
+
 class MinnaTestFrame(tk.Frame):
     def __init__(self, master, app):
         super().__init__(master, bg=theme.BG)
@@ -442,6 +469,9 @@ class MinnaTestFrame(tk.Frame):
         tk.Label(inner, text=pretty_prompt(it["prompt"]), bg=theme.CARD, fg=theme.TEXT,
                  font=theme.f(20, "bold"), wraplength=760, justify="left").pack(
             anchor="w", pady=(0, 16))
+        pic = item_image(it, inner, theme.CARD)
+        if pic is not None:
+            pic.pack(anchor="w", pady=(0, 12))
 
         opts = tk.Frame(inner, bg=theme.CARD)
         opts.pack(fill="x")

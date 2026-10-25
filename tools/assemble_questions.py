@@ -25,7 +25,7 @@ SYSTEM = """你在把日语能力考（JLPT）试卷的 OCR 结果**还原成题
 输入是一页试卷按阅读顺序排好的文字行（可能带 OCR 错误）。请把这一页里
 **所有四选一题目**还原出来，输出 JSON：
 
-{"questions":[{"no":1,"prompt":"題干","options":["A","B","C","D"]}]}
+{"questions":[{"no":1,"prompt":"題干","options":["A","B","C","D"],"figure":false}]}
 
 规则：
 1. 每题必须有 **恰好 4 个选项**；凑不齐 4 个的题**不要输出**。
@@ -36,7 +36,9 @@ SYSTEM = """你在把日语能力考（JLPT）试卷的 OCR 结果**还原成题
    「話させて」）可以顺手改正；**拿不准就保留原样**。
 6. 阅读题的大段文章不要当题干；如果这一页只有文章没有题目，输出
    {"questions":[]}。
-7. 只输出 JSON，不要解释。"""
+7. `figure`: 这道题是否**配了插图/照片/图表**（题面里有图、或题目要求看图作答）
+   才填 true；纯文字题填 false。不要凭"絵/図"这类词猜。
+8. 只输出 JSON，不要解释。"""
 
 
 def page_text(page: dict) -> str:
@@ -122,6 +124,7 @@ def main() -> int:
                 "page": page["page"],
                 "prompt": str(q["prompt"]).strip(),
                 "options": [str(o).strip() for o in q["options"]],
+                "figure": bool(q.get("figure")),
             })
             kept += 1
         print(f"  第 {page['page']} 页: 收 {kept} / {len(qs)}")

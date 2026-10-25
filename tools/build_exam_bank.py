@@ -64,8 +64,11 @@ def main() -> int:
         if answers and ans is None:
             missing += 1
             continue
-        used.append({"no": no, "prompt": q["prompt"], "options": q["options"],
-                     "answer": ans})
+        rec = {"no": no, "prompt": q["prompt"], "options": q["options"],
+               "answer": ans}
+        if q.get("image"):
+            rec["image"] = q["image"]
+        used.append(rec)
 
     sections = []
     for i in range(0, len(used), args.size):
@@ -80,6 +83,7 @@ def main() -> int:
                 "prompt": it["prompt"],
                 "options": it["options"],
                 "answer": it["answer"],
+                **({"image": it["image"]} if it.get("image") else {}),
             } for j, it in enumerate(chunk)],
         })
 

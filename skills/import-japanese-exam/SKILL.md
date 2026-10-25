@@ -104,8 +104,16 @@ python tools/build_exam_bank.py --questions questions.json \
 * 答案表如果是一张干净的表格图片（如 2016 卷），**直接看图抄**比 OCR 靠谱
   （OCR 会把表格读成乱码）；抄成 `{"1":4,"2":2,…}` 存成 answers.json。
 * 答案缺失时让 AI 生成答案（这是允许的降级路径）。
-* 题目里带插图：用 `pypdfium2` 把该页渲染成 PNG（`render(scale=2)`），
-  按题目所在区域裁切，存到 `data/exams/<id>/<卷>/`，写进 `image` 字段。
+* **带插图的题**：`assemble_questions.py` 会让模型给每题打 `figure` 标记
+  （只有题面真配图时才 true），再跑 `crop_figures.py`：
+  ```bash
+  python tools/crop_figures.py <pdf> --questions q.json --ocr ocr.json \
+      --collection jlpt-n5 --paper 3
+  ```
+  它按"题干 y → 下一题 y"裁出页面区域，存 `data/exams/<id>/figures/`，
+  并给题目写上 `image`；答题页会自动显示（`app/ui/minna_test.py: item_image`）。
+  注意这些试卷的插图是**矢量绘制**的，PDF 里没有位图对象，只能按版面裁。
+  另外别用关键词猜有没有图（「えき」「きょうなら」都会命中），必须让模型标。
 
 ### 4. AI 补答案 / 补解析
 

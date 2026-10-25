@@ -63,6 +63,10 @@ def item_image(it: dict, master, bg: str, max_w: int = 520,
         if img.width > max_w:
             img = img.resize((max_w, int(img.height * max_w / img.width)),
                              Image.LANCZOS)
+        # 听力题配的是整页图, 太高会超出卡片被截断 —— 按高度再收一次
+        if img.height > 430:
+            img = img.resize((int(img.width * 430 / img.height), 430),
+                             Image.LANCZOS)
         tkimg = ImageTk.PhotoImage(img)
         lab = tk.Label(master, image=tkimg, bg=bg, bd=0)
         lab.image = tkimg          # 必须留引用, 否则会被 GC 掉变成空白
@@ -672,7 +676,7 @@ class MinnaTestFrame(tk.Frame):
             tk.Label(inner, text=pretty_prompt(it["prompt"]), bg=theme.CARD,
                      fg=theme.TEXT, font=theme.f(20, "bold"), wraplength=760,
                      justify="left").pack(anchor="w", pady=(0, 16))
-        pic = item_image(it, inner, theme.CARD)
+        pic = item_image(it, inner, theme.CARD, max_w=820)
         if pic is not None:
             pic.pack(anchor="w", pady=(0, 12))
 
@@ -680,7 +684,11 @@ class MinnaTestFrame(tk.Frame):
         opts.pack(fill="x")
         self._opt_btns: list[FlatButton] = []
         for j, text in enumerate(it.get("options") or []):
-            b = FlatButton(opts, f"{'①②③④'[j] if j < 4 else j + 1}   {text}",
+            # 听力题的选项本身就是 ①②③④, 再拼一次就变成 "①  ①" 了
+            label = text if (text.strip() in "①②③④"
+                             and len(text.strip()) == 1) else \
+                f"{'①②③④'[j] if j < 4 else j + 1}   {text}"
+            b = FlatButton(opts, label,
                            lambda k=j + 1: self._pick_choice(k),
                            bg=theme.CARD, hover=theme.BLUE_SOFT,
                            active_bg=theme.BLUE_SOFT, fg=theme.TEXT_SOFT,
@@ -1107,7 +1115,8 @@ class MinnaTestFrame(tk.Frame):
                     if sec["kind"] == "choice":
                         opts = it.get("options") or []
                         opt_txt = "　".join(
-                            f"{'①②③④'[j] if j < 4 else j + 1}{o}"
+                            (o if o.strip() in "①②③④" and len(o.strip()) == 1
+                 else f"{'①②③④'[j] if j < 4 else j + 1}{o}")
                             for j, o in enumerate(opts))
                         tk.Label(line, text=opt_txt, bg=theme.SUNK,
                                  fg=theme.MUTED, font=theme.f(11),

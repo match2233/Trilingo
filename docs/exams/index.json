@@ -18,7 +18,7 @@
    "desc": "日语能力考 N5 真题（待导入）",
    "duration_min": 105,
    "papers": 10,
-   "items": 385,
+   "items": 502,
    "empty": false,
    "bank": "exams/jlpt-n5.json"
   }

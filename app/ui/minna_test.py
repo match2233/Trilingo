@@ -712,7 +712,7 @@ class MinnaTestFrame(tk.Frame):
         it = sec["items"][min(self.item_i, len(sec["items"]) - 1)]
         want = it.get("answer")
         if not isinstance(want, int):
-            return
+            return      # 没有标准答案: 交给渲染时的自评流程
         self._choice_done = True
         ok = pick == want
         self._record(it["id"], ok)

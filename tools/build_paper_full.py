@@ -1,19 +1,14 @@
-"""把一套 N5 试卷建成完整形态: 文字・語彙 + 文法・読解 + 聴解.
+"""把 N5 试卷建成完整形态 (支持"没有答案表"的卷子).
 
-三块的来源:
-  文字・語彙 / 文法・読解  —— OCR 页面 → AI 组装成四选一题
-  聴解                     —— 每题配"卷面那一页"的图 (番号在页内), 选项 ①②③④
-
-答案策略 (重要):
-  * 官方答案表是按 `問題N + 顺序` 排的。组装出来的题目数**正好等于**答案数时,
-    直接按顺序套用, 这就是精确对齐;
-  * 数量对不上时**不硬套**(会整体错位), 改用 AI 生成答案, 并在报告里标出来。
-    宁可答案来源不同, 也不给错答案。
+三种情况:
+  * 有答案表 -> 按题号套官方答案
+  * 没有答案表 -> 文字/文法用 AI 答案
+  * 聴解 -> 没有答案表时生成"自评"题 (answer=None), 用户听完自己判对错
 
 用法:
-    python tools/build_paper_full.py --paper 3 --title 2010年07月 \
-        --pdf "<pdf>" --answers data/ocr/answers_2010.json \
-        --text-pages 3-4 --reading-pages 5-8 --listening-pages 9-11
+    python tools/build_paper_full.py --paper 11 --title 2017年07月 \
+        --pdf "<pdf>" [--answers data/ocr/answers_2017.json] \
+        --text-pages 1-5 --reading-pages 6-9 --listening-pages 10-14
 """
 from __future__ import annotations
 
@@ -26,11 +21,10 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 TMP = ROOT / "data" / "ocr"
-RENDER_L = 2.6   # 听力页面渲染倍率
+RENDER_L = 2.6
 
 
 def flatten(table: dict) -> list[int]:
-    """把 {問題1: [...], 問題2: [...]} 按问题顺序摊平."""
     out: list[int] = []
     for key in sorted(table, key=lambda k: int("".join(c for c in k if c.isdigit()) or 0)):
         out.extend(table[key])
@@ -47,7 +41,7 @@ def main() -> int:
     ap.add_argument("--paper", type=int, required=True)
     ap.add_argument("--title", required=True)
     ap.add_argument("--pdf", required=True)
-    ap.add_argument("--answers", required=True)
+    ap.add_argument("--answers", default="")
     ap.add_argument("--collection", default="jlpt-n5")
     ap.add_argument("--text-pages", required=True)
     ap.add_argument("--reading-pages", required=True)
@@ -60,8 +54,10 @@ def main() -> int:
     from tools.generate_answers import ask as ask_answers
 
     pdf = pathlib.Path(a.pdf)
-    answers = json.loads(pathlib.Path(a.answers).read_text(encoding="utf-8-sig"))
-    # OCR 缓存由 scan_layout.py 生成: lay_2010_07_.json 这种
+    answers = {}
+    if a.answers and pathlib.Path(a.answers).exists():
+        answers = json.loads(pathlib.Path(a.answers).read_text(encoding="utf-8-sig"))
+
     import re as _re
     key = _re.sub(r"[^0-9A-Za-z]+", "_", a.title)[:12]
     cands = sorted(TMP.glob("lay_*.json"), key=lambda p: len(p.stem), reverse=True)
@@ -73,12 +69,9 @@ def main() -> int:
 
     out_root = ROOT / "data" / "exams" / a.collection
     (out_root / "img").mkdir(parents=True, exist_ok=True)
-
-    sections: list[dict] = []
     report: list[str] = []
 
     def raw_assemble(pages: list[int], mode: str = "normal") -> list[dict]:
-        """只组装, 不配答案."""
         qs: list[dict] = []
         for page in ocr["items"]:
             if page["page"] not in pages:
@@ -92,20 +85,16 @@ def main() -> int:
         return qs
 
     def align(qs: list[dict], section: str) -> list[dict]:
-        """按**题号**套官方答案; 题号对不上时才退回 AI 答案.
-
-        实测模型返回的 no 就是卷面题号 (2010 文字語彙: 1..33 缺 20),
-        所以哪怕少解出几题, 答案依然能精确对上 —— 不用再靠"数量相等"。
-        """
-        key = flatten(answers.get(section) or {})
+        table = answers.get(section) or {}
+        key_ans = flatten(table)
         hit = 0
         for q in qs:
             try:
                 n = int(q.get("no"))
             except (TypeError, ValueError):
                 continue
-            if 1 <= n <= len(key):
-                q["_answer"] = key[n - 1]
+            if key_ans and 1 <= n <= len(key_ans):
+                q["_answer"] = key_ans[n - 1]
                 hit += 1
         miss = [q for q in qs if "_answer" not in q]
         if miss:
@@ -122,68 +111,47 @@ def main() -> int:
                     q["_answer"] = int(str(v)[0])
                 except (TypeError, ValueError, IndexError):
                     q["_answer"] = 1
-            report.append(f"{section}: {hit} 题用官方答案, {len(miss)} 题用 AI 答案")
+            report.append(f"{section}: {hit} 题官方答案 / {len(miss)} 题 AI 答案")
         else:
-            report.append(f"{section}: {hit} 题全部用官方答案")
+            report.append(f"{section}: {hit} 题官方答案")
         return qs
 
-    def assemble(pages: list[int], section: str, group: str,
-                 mode: str = "normal") -> list[dict]:
-        """按页组装, 再按答案数量决定答案来源.
+    sections: list[dict] = []
+    si = 0
+    read_pages = parse_range(a.reading_pages)
+    grammar_pages = read_pages[:max(1, len(read_pages) - 2)]
+    passage_pages = read_pages[len(grammar_pages):]
 
-        文法・読解 里前几页是四选一文法题 (normal), 后面才是带文章的长文题
-        (reading) —— 全部用 reading 模式会把语法题全漏掉 (实测 32 题只解出 8)。
-        """
-        qs = align(raw_assemble(pages, mode), section)
+    for section, pages_spec in (("文字・語彙", a.text_pages),
+                                ("文法・読解", a.reading_pages)):
+        if section == "文法・読解":
+            qs = raw_assemble(grammar_pages, "normal") + \
+                raw_assemble(passage_pages, "reading")
+        else:
+            qs = raw_assemble(parse_range(pages_spec), "normal")
+        qs = align(qs, section)
         items = []
-        for i, q in enumerate(qs):
+        for q in qs:
             prompt = q["prompt"]
             if q.get("passage"):
                 prompt = f'【文章】{q["passage"]}\n【問】{prompt}'
             items.append({"prompt": prompt, "options": q["options"],
                           "answer": q.get("_answer", 1)})
-        return items
-
-    si = 0
-    read_pages = parse_range(a.reading_pages)
-    # 文法页用 normal, 长文页用 reading
-    grammar_pages = read_pages[:max(1, len(read_pages) - 2)]
-    passage_pages = read_pages[len(grammar_pages):]
-    for section, pages_spec, group in (
-            ("文字・語彙", a.text_pages, "文字・語彙"),
-            ("文法・読解", a.reading_pages, "文法・読解")):
-        if section == "文法・読解":
-            qs = raw_assemble(grammar_pages, "normal")
-            if passage_pages:
-                qs += raw_assemble(passage_pages, "reading")
-            qs = align(qs, section)
-            items = []
-            for q in qs:
-                prompt = q["prompt"]
-                if q.get("passage"):
-                    prompt = f'【文章】{q["passage"]}\n【問】{prompt}'
-                items.append({"prompt": prompt, "options": q["options"],
-                              "answer": q.get("_answer", 1)})
-        else:
-            items = assemble(parse_range(pages_spec), section, group)
         if not items:
             continue
         si += 1
         for i, it in enumerate(items):
             it["id"] = f"Q{a.paper:02d}-S{si}-{i + 1}"
         sections.append({"no": si, "title": f"{section}（{len(items)} 题）",
-                         "kind": "choice", "group": group, "items": items})
+                         "kind": "choice", "group": section, "items": items})
 
-    # 聴解: 每一番裁一块图 (按"番"切, 不是整页)
-    lis = answers.get("聴解") or {}
-    lis_pages = parse_range(a.listening_pages)
+    # ---------------- 聴解 ----------------
+    import numpy as np
     import pypdfium2 as pdfium
 
     doc = pdfium.PdfDocument(str(pdf))
 
     def bands_of(img, min_h=90, gap=16):
-        """按横向全白的分隔行切出"行带"."""
-        import numpy as np
         g = np.asarray(img.convert("L"))
         H, W = g.shape
         prof = g[:, int(W * 0.03):int(W * 0.97)].min(axis=1)
@@ -204,76 +172,68 @@ def main() -> int:
             out.append((start, H))
         return out
 
-    def force_count(bs, need):
-        """把行带数量强行调成 need: 多了合并最近的, 少了拆最高的."""
-        bs = list(bs)
-        while len(bs) > need:
-            gaps = [(bs[i + 1][0] - bs[i][1], i) for i in range(len(bs) - 1)]
-            _, i = min(gaps)
-            bs[i] = (bs[i][0], bs[i + 1][1])
-            del bs[i + 1]
-        # 不够时就别硬拆 —— 拆分只会得到 90px 的残图; 宁可相邻两题共用一块
-        return bs
+    def trim(crop):
+        g = np.asarray(crop.convert("L"))
+        m = g < 235
+        if not m.any():
+            return crop
+        ys, xs = np.where(m)
+        pad = 6
+        return crop.crop((max(0, int(xs.min()) - pad), max(0, int(ys.min()) - pad),
+                          min(crop.width, int(xs.max()) + pad),
+                          min(crop.height, int(ys.max()) + pad)))
 
-    groups = sorted(lis.items(),
+    lis_table = answers.get("聴解") or {}
+    groups = sorted(lis_table.items(),
                     key=lambda kv: int("".join(c for c in kv[0] if c.isdigit()) or 0))
-    total_need = sum(len(v) for _k, v in groups)
-    pages_img = [doc[pg - 1].render(scale=RENDER_L) for pg in lis_pages]
-    pages_img = [im.to_pil() for im in pages_img]
-    per_page = [len(bands_of(im)) for im in pages_img]
-    total_bands = sum(per_page) or 1
+    lis_flat = flatten(lis_table)
+    lis_counts = [len(v) for _k, v in groups]
 
-    boxes: list[tuple[int, tuple[int, int]]] = []   # (页索引, (y0,y1))
-    remain = total_need
-    for i, im in enumerate(pages_img):
-        last = i == len(pages_img) - 1
-        quota = remain if last else max(1, round(remain * per_page[i] / max(1, sum(per_page[i:]))))
-        quota = min(quota, remain)
-        bs = force_count(bands_of(im), quota)
-        if len(bs) > quota:
-            bs = bs[:quota]
-        for (y0, y1) in bs:
-            boxes.append((i, (y0, y1)))
-        remain -= len(bs)
+    boxes: list = []
+    for pg in parse_range(a.listening_pages):
+        img = doc[pg - 1].render(scale=RENDER_L).to_pil()
+        for (y0, y1) in bands_of(img):
+            boxes.append((img, y0, y1))
 
-    si_done = 0
+    target = sum(lis_counts) if lis_counts else len(boxes)
+    if target and len(boxes) > target:
+        keep, step = [], len(boxes) / target
+        for i in range(target):
+            lo = int(i * step)
+            hi = max(lo + 1, int((i + 1) * step))
+            keep.append((boxes[lo][0], boxes[lo][1], boxes[min(hi, len(boxes)) - 1][2]))
+        boxes = keep
+
+    if not groups:
+        groups = [("聴解", [None] * len(boxes))]
+
+    idx = 0
     for gname, values in groups:
         si += 1
         items = []
-        for i, ans in enumerate(values):
-            # 块比题少时, 后面的题共用最后一块 (不造假图)
-            pi, (y0, y1) = boxes[min(si_done, len(boxes) - 1)]
-            im = pages_img[pi]
+        for i in range(len(values)):
+            if idx >= len(boxes):
+                break
+            im, y0, y1 = boxes[idx]
             W, H = im.size
-            name = f"p{a.paper:02d}-l{si_done + 1:02d}.png"
-            crop = im.crop((int(W * 0.03), max(0, y0 - 8),
-                            int(W * 0.97), min(H, y1 + 8)))
-            # 去掉四周白边, 图在界面里就能放大显示
-            import numpy as _np
-            _g = _np.asarray(crop.convert("L"))
-            _m = _g < 235
-            if _m.any():
-                _ys, _xs = _np.where(_m)
-                pad = 6
-                crop = crop.crop((max(0, int(_xs.min()) - pad),
-                                  max(0, int(_ys.min()) - pad),
-                                  min(crop.width, int(_xs.max()) + pad),
-                                  min(crop.height, int(_ys.max()) + pad)))
+            name = f"p{a.paper:02d}-l{idx + 1:02d}.png"
+            crop = trim(im.crop((int(W * 0.03), max(0, y0 - 8),
+                                 int(W * 0.97), min(H, y1 + 8))))
             crop.save(out_root / "img" / name)
             items.append({
                 "id": f"Q{a.paper:02d}-S{si}-{i + 1}",
                 "prompt": f"第 {i + 1} 番（{gname}）",
                 "options": ["①", "②", "③", "④"],
-                "answer": ans,
+                "answer": lis_flat[idx] if lis_flat else None,
                 "image": f"exams/{a.collection}/img/{name}",
             })
-            si_done += 1
+            idx += 1
         if items:
-            sections.append({"no": si,
-                             "title": f"聴解 {gname[-1]}（{len(items)} 题）",
+            sections.append({"no": si, "title": f"聴解 {gname[-1]}（{len(items)} 题）",
                              "kind": "choice", "group": "聴解", "items": items})
-    if lis:
-        report.append(f"聴解: {total_need} 题, 按番裁出 {si_done} 块, 答案=官方答案表")
+    if idx:
+        report.append(f"聴解: {idx} 题"
+                      + ("（官方答案）" if lis_flat else "（无答案表 -> 自评）"))
 
     if not sections:
         print("没产出任何题目")
@@ -294,7 +254,7 @@ def main() -> int:
     lesson = {"lesson": a.paper, "title": a.title,
               "duration_min": a.minutes, "sections": sections}
     if old and old[0].get("audio"):
-        lesson["audio"] = old[0]["audio"]      # 重建不要把听力音频丢掉
+        lesson["audio"] = old[0]["audio"]
     lessons.append(lesson)
     lessons.sort(key=lambda l: l["lesson"])
     bank["lessons"] = lessons

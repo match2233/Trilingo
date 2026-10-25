@@ -86,10 +86,6 @@ class TrilingoApp(tk.Tk):
             from .deer import DeerFrame
 
             return DeerFrame(self.container, self)
-        if name == "jp_tests":
-            from .jp_tests import JpTestsFrame
-
-            return JpTestsFrame(self.container, self)
         if name == "minna":
             from .minna import MinnaListFrame
 
@@ -259,10 +255,10 @@ class MenuFrame(tk.Frame):
                                   theme.BLUE, theme.BLUE_SOFT,
                                   lambda: self.app.show("mistakes"))
 
-        # 第二行: 日语测试 / 句子练习 / 生活记录
-        self.btn_minna = self._quad(grid, 1, 0, "日语测试", "单元测试 · JLPT",
+        # 第二行: 新标日测试 / 句子练习 / 生活记录
+        self.btn_minna = self._quad(grid, 1, 0, "新标日测试", "24 课同步测试卷",
                                     theme.PRIMARY_DARK, theme.PRIMARY_SOFT,
-                                    lambda: self.app.show("jp_tests"))
+                                    lambda: self.app.show("minna"))
         self.btn_sentence = self._quad(grid, 1, 1, "句子练习", "开发中",
                                        theme.MUTED, theme.BG,
                                        lambda: self.app.show("sentence"))
@@ -328,23 +324,22 @@ class MenuFrame(tk.Frame):
         else:
             self.btn_err.set_subtitle(f"英 {en_n} · 日 {jp_n}")
 
-        # 日语测试: 几个试卷集 / 已完成几套
+        # 新标日测试: 完成了几课 / 平均分
         from .. import minna
 
         prog = self.app.db.minna_all_progress()
         done = [p for p in prog.values() if p["status"] == "done"]
         doing = [p for p in prog.values() if p["status"] == "doing"]
-        cols = minna.collections()
-        total_papers = sum(len(minna.lessons(c["id"])) for c in cols)
-        if not total_papers:
-            self.btn_minna.set_subtitle(f"{len(cols)} 个试卷集 · 还没有试卷")
-        elif done:
+        total_les = len(minna.lessons())
+        if done:
+            score = sum(p["score"] for p in done)
+            tot = sum(p["total"] for p in done) or 1
             self.btn_minna.set_subtitle(
-                f"{len(cols)} 个试卷集 · 已完成 {len(done)} 套")
+                f"已完成 {len(done)}/{total_les} 课 · 正确率 {score * 100 // tot}%")
         elif doing:
-            self.btn_minna.set_subtitle(f"{len(cols)} 个试卷集 · 有 {len(doing)} 套未做完")
+            self.btn_minna.set_subtitle(f"有 {len(doing)} 课未做完")
         else:
-            self.btn_minna.set_subtitle(f"{len(cols)} 个试卷集 · 共 {total_papers} 套")
+            self.btn_minna.set_subtitle(f"共 {total_les} 课 · 未开始")
 
         # 同步状态 + 补全结果, 都显示（同步那条不含统计数字）
         parts = [t for t in (self.app._sync_notice, self.app._enrich_notice) if t]

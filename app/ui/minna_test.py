@@ -140,13 +140,8 @@ class MinnaTestFrame(tk.Frame):
             self.item_i = int(prog["idx"] or 0)
             self._base_seconds = int(prog["seconds"] or 0)
         self._session_start = dt.datetime.now()
-        # 限时试卷 (JLPT 按卷面要求) 用倒计时; 单元测试不限时
-        meta = minna.paper_meta(les)
-        self._limit_seconds = meta["minutes"] * 60
-        self.title.configure(text=les.get("title") or f"第 {lesson} 课")
-        self.timer_cap.configure(text="剩余" if self._limit_seconds else "用时")
-        if self._limit_seconds:
-            self.timer.configure(fg=theme.ORANGE if hasattr(theme, "ORANGE") else theme.PRIMARY)
+        self.title.configure(text=f"第 {lesson} 课")
+        self.timer_cap.configure(text="用时")
         self.timer.pack(side="right", padx=(10, 0))
         self._tick()
         self._render_section()
@@ -180,39 +175,8 @@ class MinnaTestFrame(tk.Frame):
     def _tick(self) -> None:
         if self._mode != "test":
             return
-        limit = int(getattr(self, "_limit_seconds", 0) or 0)
-        if limit:
-            # 限时试卷 (JLPT): 右上角显示剩余时间, 到点自动交卷
-            left = limit - self.elapsed()
-            self.timer.configure(text=minna.fmt_clock(max(0, left)))
-            self.timer_cap.configure(text="剩余")
-            if left <= 0:
-                self.timer.configure(text="00:00")
-                self._time_up()
-                return
-            if left <= 300:
-                self.timer.configure(fg=theme.ERROR)
-        else:
-            self.timer.configure(text=minna.fmt_clock(self.elapsed()))
-            self.timer_cap.configure(text="用时")
+        self.timer.configure(text=minna.fmt_clock(self.elapsed()))
         self._tick_id = self.after(1000, self._tick)
-
-    def _time_up(self) -> None:
-        """限时到: 停止计时, 记下未答的题, 直接交卷."""
-        self._clear_after()
-        sec = self._current()
-        if sec is not None:
-            it = sec["items"][min(self.item_i, len(sec["items"]) - 1)]
-            if self._fill_toggles and it["id"] not in self.results:
-                self.results[it["id"]] = True
-        total = sum(len(s["items"]) for s in self.sections)
-        self.app.db.minna_save_cursor(self.lesson_no, self.sec_i, self.item_i,
-                                      self._base_seconds + self._limit_seconds,
-                                      len([1 for v in self.results.values() if v]))
-        self.app.db.minna_finish(self.lesson_no, self._limit_seconds,
-                                 sum(1 for v in self.results.values() if v), total)
-        self._mode = "paper"
-        self._show_paper(just_finished=True)
 
     def _update_progress(self) -> None:
         total = sum(len(s["items"]) for s in self.sections) or 1

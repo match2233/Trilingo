@@ -106,11 +106,10 @@ class MinnaFavFrame(tk.Frame):
 
         head = tk.Frame(self, bg=theme.BG)
         head.pack(fill="x", padx=22, pady=(14, 2))
-        FlatButton(head, "← 返回", self._go_back, bg=theme.CARD,
+        FlatButton(head, "← 返回", lambda: self.app.show("minna"), bg=theme.CARD,
                    font=theme.f(11), padx=12, pady=6).pack(side="left")
-        self.title = tk.Label(head, text="收藏夹", bg=theme.BG, fg=theme.TEXT,
-                              font=theme.f(19, "bold"))
-        self.title.pack(side="left", padx=14)
+        tk.Label(head, text="收藏夹", bg=theme.BG, fg=theme.TEXT,
+                 font=theme.f(19, "bold")).pack(side="left", padx=14)
         self.summary = tk.Label(head, text="", bg=theme.BG, fg=theme.MUTED,
                                 font=theme.f(11))
         self.summary.pack(side="right")
@@ -118,33 +117,14 @@ class MinnaFavFrame(tk.Frame):
         self.scroll = ScrollFrame(self)
         self.scroll.pack(fill="both", expand=True, padx=22, pady=(6, 12))
 
-    def _go_back(self) -> None:
-        if getattr(self, "coll_id", None):
-            self.app.show("minna", coll=self.coll_id)
-        else:
-            self.app.show("jp_tests")
-
     # ------------------------------------------------------------ 渲染
-    def on_show(self, coll: str | None = None, **_):
-        # 收藏按试卷集分开: 只显示当前集里的题 (lesson 编号不重叠)
-        col = minna.collection(coll) or minna.collection(getattr(self, "coll_id", None))
-        self.coll_id = col["id"] if col else None
-        base = int(col.get("base") or 0) if col else 0
-        title = col.get("name", "收藏夹") if col else "收藏夹"
-        self.title.configure(text=f"收藏夹 · {title}" if col else "收藏夹")
-        self.back_target = "minna" if col else "jp_tests"
-        self.base = base
+    def on_show(self, **_):
         self.render()
-
-    def _in_scope(self, fav: dict) -> bool:
-        base = getattr(self, "base", 0)
-        les = int(fav["lesson"])
-        return not base or base <= les < base + 1000
 
     def render(self) -> None:
         for w in self.scroll.body.winfo_children():
             w.destroy()
-        favs = [f for f in self.app.db.minna_fav_all() if self._in_scope(f)]
+        favs = self.app.db.minna_fav_all()
         total_note = sum(1 for f in favs if (f.get("note") or "").strip())
         self.summary.configure(
             text=f"共 {len(favs)} 题" + (f"　·　{total_note} 题有笔记" if favs else ""))

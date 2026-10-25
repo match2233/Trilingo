@@ -26,6 +26,8 @@ def use(bank: dict | None) -> None:
     """切换当前试卷集. 传 None 回到默认的历史题库."""
     global _ACTIVE
     _ACTIVE = bank
+    # load_bank 是 lru_cache 的, 不清掉的话切到另一套卷子读到的还是旧题库
+    load_bank.cache_clear()
 
 
 def active_meta() -> dict:

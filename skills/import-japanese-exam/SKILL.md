@@ -79,12 +79,28 @@ python tools/ocr_paper.py <pdf> --pages 1-8 --scale 3.0
   假名偶有混淆 (さ/き、ぽ/ぼ、っ/。), 需要 AI 顺一遍。
 * 速度 ~3-5 秒/页。
 
-### 3. 解析成题目
+### 3. 解析成题目（实测可用的一条流水线）
 
-* 有正常文字层的 PDF：按页取文字，按「問題1/問題2…」或题号分组，
-  四选一题取题干 + 4 个选项，答案从答案文件对。
-* 答案文件是图片/扫描件：把题目文字（已解析出来的）批量发给 LLM，
-  让它给出每题答案 —— 这是「缺答案但 AI 能解决」的情况。
+```bash
+# 1) OCR: PDF -> 逐页行文本(带坐标)
+python tools/ocr_paper.py <pdf> --pages 1-8 --scale 2.2
+
+# 2) AI 组装: 行 -> 四选一题目 (正则搞不定的版式交给模型)
+python tools/assemble_questions.py <ocr.json> --out questions.json
+
+# 3) 建卷: 题目 + 答案 -> 试卷集 lesson
+python tools/build_exam_bank.py --questions questions.json \
+    --collection jlpt-n5 --paper 1 --minutes 105 --answers answers.json
+```
+
+* **为什么用 AI 组装**：题号被 OCR 成 `ã2/ê5/30`、短假名选项被合成一行、
+  题干到选项行距不固定 —— 规则写不赢版式，模型能"看懂"。实测 2016 卷
+  8 页 → 50 题，且顺手改正了 `さんぼ→さんぽ`、`話きせて→話させて`。
+* 组装时会**严格校验**：必须恰好 4 个选项、无重复、题干非空、含假名，
+  不合格的整题丢掉（宁缺勿错）。
+* 答案表如果是一张干净的表格图片（如 2016 卷），**直接看图抄**比 OCR 靠谱
+  （OCR 会把表格读成乱码）；抄成 `{"1":4,"2":2,…}` 存成 answers.json。
+* 答案缺失时让 AI 生成答案（这是允许的降级路径）。
 * 题目里带插图：用 `pypdfium2` 把该页渲染成 PNG（`render(scale=2)`），
   按题目所在区域裁切，存到 `data/exams/<id>/<卷>/`，写进 `image` 字段。
 

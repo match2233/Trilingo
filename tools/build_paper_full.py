@@ -32,8 +32,15 @@ def flatten(table: dict) -> list[int]:
 
 
 def parse_range(s: str) -> list[int]:
-    lo, _, hi = s.partition("-")
-    return list(range(int(lo), int(hi or lo) + 1))
+    """支持 3-8 以及 3-8,50-58 这种多段写法."""
+    out: list[int] = []
+    for part in str(s).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        lo, _, hi = part.partition("-")
+        out.extend(range(int(lo), int(hi or lo) + 1))
+    return out
 
 
 def main() -> int:
@@ -42,11 +49,14 @@ def main() -> int:
     ap.add_argument("--title", required=True)
     ap.add_argument("--pdf", required=True)
     ap.add_argument("--answers", default="")
+    ap.add_argument("--ocr", default="", help="直接指定 OCR 缓存 (分卷 PDF 时用)")
     ap.add_argument("--collection", default="jlpt-n5")
     ap.add_argument("--text-pages", required=True)
     ap.add_argument("--reading-pages", required=True)
     ap.add_argument("--listening-pages", required=True)
     ap.add_argument("--minutes", type=int, default=105)
+    ap.add_argument("--groups", default="",
+                    help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
     a = ap.parse_args()
 
     from app import exams
@@ -60,8 +70,11 @@ def main() -> int:
 
     import re as _re
     key = _re.sub(r"[^0-9A-Za-z]+", "_", a.title)[:12]
-    cands = sorted(TMP.glob("lay_*.json"), key=lambda p: len(p.stem), reverse=True)
-    ocr_path = next((c for c in cands if key and key[:7] in c.stem), None)
+    if a.ocr:
+        ocr_path = pathlib.Path(a.ocr)
+    else:
+        cands = sorted(TMP.glob("lay_*.json"), key=lambda p: len(p.stem), reverse=True)
+        ocr_path = next((c for c in cands if key and key[:7] in c.stem), None)
     if ocr_path is None:
         raise SystemExit(f"找不到 {a.title} 的 OCR 缓存 (key={key})")
     ocr = json.loads(ocr_path.read_text(encoding="utf-8"))
@@ -116,6 +129,10 @@ def main() -> int:
             report.append(f"{section}: {hit} 题官方答案")
         return qs
 
+    want = [g.strip() for g in a.groups.split(",") if g.strip()]
+    if not want:
+        want = ["文字・語彙", "文法・読解", "聴解"]
+
     sections: list[dict] = []
     si = 0
     read_pages = parse_range(a.reading_pages)
@@ -124,6 +141,8 @@ def main() -> int:
 
     for section, pages_spec in (("文字・語彙", a.text_pages),
                                 ("文法・読解", a.reading_pages)):
+        if section not in want:
+            continue
         if section == "文法・読解":
             qs = raw_assemble(grammar_pages, "normal") + \
                 raw_assemble(passage_pages, "reading")
@@ -184,13 +203,14 @@ def main() -> int:
                           min(crop.height, int(ys.max()) + pad)))
 
     lis_table = answers.get("聴解") or {}
+    do_lis = "聴解" in want
     groups = sorted(lis_table.items(),
                     key=lambda kv: int("".join(c for c in kv[0] if c.isdigit()) or 0))
     lis_flat = flatten(lis_table)
     lis_counts = [len(v) for _k, v in groups]
 
     boxes: list = []
-    for pg in parse_range(a.listening_pages):
+    for pg in (parse_range(a.listening_pages) if do_lis else []):
         img = doc[pg - 1].render(scale=RENDER_L).to_pil()
         for (y0, y1) in bands_of(img):
             boxes.append((img, y0, y1))
@@ -251,6 +271,21 @@ def main() -> int:
             pass
     old = [l for l in bank.get("lessons") or [] if l.get("lesson") == a.paper]
     lessons = [l for l in bank.get("lessons") or [] if l.get("lesson") != a.paper]
+    if old:
+        # 只重建了部分分区时, 把没重建的分区原样接回来
+        # 只保留"已知分区且这次没重建"的; group 为空的旧格式分区一律丢掉,
+        # 否则新旧题目会重复混在一起 (2017 卷就踩过: 20 道旧题挂着空 group)
+        known = ("文字・語彙", "文法・読解", "聴解")
+        kept = [s for s in old[0].get("sections") or []
+                if s.get("group") in known and s.get("group") not in want]
+        if kept:
+            sections = kept + sections
+            sections.sort(key=lambda s: 0 if s.get("group") == "文字・語彙"
+                          else (1 if s.get("group") == "文法・読解" else 2))
+            for i, s in enumerate(sections, start=1):
+                s["no"] = i
+                for j, it in enumerate(s["items"], start=1):
+                    it["id"] = f"Q{a.paper:02d}-S{i}-{j}"
     lesson = {"lesson": a.paper, "title": a.title,
               "duration_min": a.minutes, "sections": sections}
     if old and old[0].get("audio"):
@@ -265,7 +300,7 @@ def main() -> int:
     total = sum(len(s["items"]) for s in sections)
     print(f"\n第 {a.paper} 套「{a.title}」: {len(sections)} 个大题 / {total} 题")
     for g in ("文字・語彙", "文法・読解", "聴解"):
-        n = sum(len(s["items"]) for s in sections if s["group"] == g)
+        n = sum(len(s["items"]) for s in sections if s.get("group") == g)
         print(f"  {g}: {n} 题")
     for r in report:
         print("  ·", r)

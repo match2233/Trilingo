@@ -97,13 +97,20 @@ class MinnaListFrame(tk.Frame):
                          font=theme.f(11), width=10)
         spent.pack(side="right")
         # 重置这一套的进度 (先问一句, 免得误点)
-        reset = tk.Label(row, text="重置", bg=theme.CARD, fg=theme.MUTED,
-                         font=theme.f(10), cursor="hand2")
+        reset = tk.Label(row, text="重置", bg=theme.SUNK, fg=theme.MUTED,
+                         font=theme.f(10), cursor="hand2", padx=8, pady=2,
+                         highlightthickness=1,
+                         highlightbackground=theme.BORDER)
         reset.pack(side="right", padx=(0, 10))
         reset.bind("<Button-1>", lambda e, n=num, t=label: self._reset(n, t))
+        reset.bind("<Enter>", lambda e: reset.configure(bg=theme.PRIMARY_SOFT,
+                                                        fg=theme.PRIMARY))
+        reset.bind("<Leave>", lambda e: reset.configure(bg=theme.SUNK,
+                                                        fg=theme.MUTED))
 
         # 整行(含进度条与所有文字)一起高亮 + 一起可点
-        btn.bind_hover_group(row, name, pct, score, spent, bar, reset)
+        # 注意: 不要把 reset 放进 hover 组, 否则它的点击会被覆盖成"进入这一课"
+        btn.bind_hover_group(row, name, pct, score, spent, bar)
         self._rows[num] = {"bar": bar, "pct": pct, "score": score,
                            "spent": spent, "label": name, "btn": btn}
 

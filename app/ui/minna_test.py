@@ -285,6 +285,11 @@ class MinnaTestFrame(tk.Frame):
         win.configure(bg=theme.BG)
         win.transient(self.winfo_toplevel())
         center_window(win, 720, 560)
+        # 抓住输入: 否则点题号关闭弹窗的那一下会"穿透"到下面的选项, 误选答案
+        try:
+            win.grab_set()
+        except tk.TclError:
+            pass
 
         tk.Label(win, text="点题号直接跳过去", bg=theme.BG, fg=theme.MUTED,
                  font=theme.f(10)).pack(anchor="w", padx=16, pady=(12, 4))
@@ -341,9 +346,14 @@ class MinnaTestFrame(tk.Frame):
                     lbl = tk.Label(cell, text=str(i + 1), bg=bg, fg=fg,
                                    font=theme.f(11, "bold"))
                     lbl.place(relx=0.5, rely=0.5, anchor="center")
+                    def _pick(e, s=si, k=i):
+                        # 松开再跳; 延迟销毁, 让这次点击彻底走完再关窗
+                        self._jump(s, k)
+                        win.after(30, win.destroy)
+                        return "break"
+
                     for w in (cell, lbl):
-                        w.bind("<Button-1>",
-                               lambda e, s=si, k=i: (self._jump(s, k), win.destroy()))
+                        w.bind("<ButtonRelease-1>", _pick)
         return win
 
     def _prev_question(self) -> None:

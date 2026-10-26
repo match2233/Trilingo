@@ -71,6 +71,8 @@ def main() -> int:
                     help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
     ap.add_argument("--groups", default="",
                     help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
+    ap.add_argument("--groups", default="",
+                    help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
     a = ap.parse_args()
 
     from app import exams
@@ -98,18 +100,33 @@ def main() -> int:
     (out_root / "img").mkdir(parents=True, exist_ok=True)
     report: list[str] = []
 
-    def raw_assemble(pages: list[int], mode: str = "normal") -> list[dict]:
-        qs: list[dict] = []
-        for page in ocr["items"]:
-            if page["page"] not in pages:
-                continue
-            try:
-                got = ask(page, mode)
-            except Exception as exc:      # noqa: BLE001
-                report.append(f"第{page['page']}页组装失败: {exc}")
-                continue
-            qs.extend([q for q in got if valid(q)[0]])
-        return qs
+    def raw_assemble(pages: list[int], mode: str = "normal",
+                     passes: int = 2) -> list[dict]:
+        """同一页跑两遍再按题号取并集.
+
+        模型每次漏掉的题不一样 (同页两遍能多捞回几道), 所以默认重复一遍;
+        题号相同的保留第一遍的 (先到先得), 补上第二遍独有的。
+        """
+        by_no: dict = {}
+        order: list = []
+        for _ in range(max(1, passes)):
+            for page in ocr["items"]:
+                if page["page"] not in pages:
+                    continue
+                try:
+                    got = ask(page, mode)
+                except Exception as exc:      # noqa: BLE001
+                    report.append(f"第{page['page']}页组装失败: {exc}")
+                    continue
+                for q in got:
+                    if not valid(q)[0]:
+                        continue
+                    key = q.get("no")
+                    if key in by_no:
+                        continue
+                    by_no[key] = q
+                    order.append(key)
+        return [by_no[k] for k in order]
 
     def align(qs: list[dict], section: str) -> list[dict]:
         table = answers.get(section) or {}
@@ -179,6 +196,10 @@ def main() -> int:
     if not want:
         want = ["文字・語彙", "文法・読解", "聴解"]
 
+    want = [g.strip() for g in a.groups.split(",") if g.strip()]
+    if not want:
+        want = ["文字・語彙", "文法・読解", "聴解"]
+
     sections: list[dict] = []
     si = 0
     read_pages = parse_range(a.reading_pages)
@@ -187,6 +208,8 @@ def main() -> int:
 
     for section, pages_spec in (("文字・語彙", a.text_pages),
                                 ("文法・読解", a.reading_pages)):
+        if section not in want:
+            continue
         if section not in want:
             continue
         if section not in want:
@@ -274,6 +297,7 @@ def main() -> int:
     do_lis = "聴解" in want
     do_lis = "聴解" in want
     do_lis = "聴解" in want
+    do_lis = "聴解" in want
     groups = sorted(lis_table.items(),
                     key=lambda kv: int("".join(c for c in kv[0] if c.isdigit()) or 0))
     lis_flat = flatten(lis_table)
@@ -307,8 +331,9 @@ def main() -> int:
             im, y0, y1 = boxes[idx]
             W, H = im.size
             name = f"p{a.paper:02d}-l{idx + 1:02d}.png"
+            # 底部多留 18px: 四个选项常排成两行, 之前一刀切掉第二行
             crop = trim(im.crop((int(W * 0.03), max(0, y0 - 8),
-                                 int(W * 0.97), min(H, y1 + 8))))
+                                 int(W * 0.97), min(H, y1 + 18))))
             crop.save(out_root / "img" / name)
             items.append({
                 "id": f"Q{a.paper:02d}-S{si}-{i + 1}",

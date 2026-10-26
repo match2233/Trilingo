@@ -44,7 +44,7 @@ class MinnaListFrame(tk.Frame):
         # 列标题: 与下面的行对齐
         cols = tk.Frame(self, bg=theme.BG)
         cols.pack(fill="x", padx=36, pady=(6, 2))
-        tk.Label(cols, text="课程", bg=theme.BG, fg=theme.MUTED,
+        tk.Label(cols, text="试卷", bg=theme.BG, fg=theme.MUTED,
                  font=theme.f(10, "bold"), width=7, anchor="w").pack(side="left")
         tk.Label(cols, text="完成进度", bg=theme.BG, fg=theme.MUTED,
                  font=theme.f(10, "bold")).pack(side="left", padx=(6, 40))

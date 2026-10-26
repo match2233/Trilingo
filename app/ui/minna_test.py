@@ -74,6 +74,36 @@ def item_image(it: dict, master, bg: str, max_w: int = 520,
     except Exception:      # noqa: BLE001
         return None
 
+
+def render_rich_prompt(master, text: str, bg: str, font_size: int = 18,
+                       wraplength: int = 820):
+    """把 ~标红~ / __下划线__ 渲染成带格式的文本 (不截图也能保留格式).
+
+    返回 Text 控件; 行数按内容自动撑开, 太长时内部可滚动。
+    """
+    import re as _re
+
+    box = tk.Frame(master, bg=bg)
+    lines = max(1, text.count("\n") + 1 + len(text) // 46)
+    txt = tk.Text(box, height=min(12, lines), wrap="word", bg=bg,
+                  fg=theme.TEXT, font=theme.f(font_size, "bold"), bd=0,
+                  padx=0, pady=0, highlightthickness=0, cursor="arrow")
+    txt.tag_configure("red", foreground=theme.ERROR)
+    txt.tag_configure("under", underline=True)
+    # 两个标记可以嵌套, 这里简单按出现顺序切段处理
+    for part in _re.split(r"(~[^~]*~|__[^_]*__)", text):
+        if not part:
+            continue
+        if part.startswith("~") and part.endswith("~") and len(part) > 2:
+            txt.insert("end", part[1:-1], ("red",))
+        elif part.startswith("__") and part.endswith("__") and len(part) > 4:
+            txt.insert("end", part[2:-2], ("under",))
+        else:
+            txt.insert("end", part)
+    txt.configure(state="disabled")
+    txt.pack(fill="x")
+    return box
+
 class MinnaTestFrame(tk.Frame):
     def __init__(self, master, app):
         super().__init__(master, bg=theme.BG)
@@ -710,9 +740,17 @@ class MinnaTestFrame(tk.Frame):
                  fg=theme.BLUE, font=theme.f(11, "bold")).pack(side="left")
         tk.Label(head, text=f"第 {idx + 1} / {len(items)} 小题", bg=theme.CARD,
                  fg=theme.MUTED, font=theme.f(11)).pack(side="right")
-        # 题干: 有原卷截图就显示截图 (保留下划线/加粗/标红), 否则显示文字
-        shot = item_image(it, inner, theme.CARD, max_w=900, key="prompt_image")
-        if shot is not None:
+        # 题干: 有富文本标记就用带格式的文字; 其次原卷截图; 最后纯文字
+        rich = it.get("prompt_rich")
+        shot = None
+        if rich:
+            box = render_rich_prompt(inner, rich, theme.CARD)
+            box.pack(anchor="w", fill="x", pady=(0, 16))
+        else:
+            shot = item_image(it, inner, theme.CARD, max_w=900, key="prompt_image")
+        if rich:
+            pass
+        elif shot is not None:
             shot.pack(anchor="w", pady=(0, 16))
         elif len(it["prompt"]) > 140:
             # 长文章 (読解): 放进可滚动区域, 否则会把下面的选项挤出屏幕

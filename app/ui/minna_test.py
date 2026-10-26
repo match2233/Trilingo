@@ -44,7 +44,7 @@ CORRECT_WAIT_MS = 5000      # 选择题答对后停留多久自动下一题
 
 
 def item_image(it: dict, master, bg: str, max_w: int = 520,
-               key: str = "image"):
+               key: str = "image", max_h: int = 300):
     """题目配图 (导入时从 PDF 裁出来的). 没有就返回 None.
 
     图片路径相对 data/ 目录; 文件不在就当没有图, 不显示占位。
@@ -64,8 +64,9 @@ def item_image(it: dict, master, bg: str, max_w: int = 520,
             img = img.resize((max_w, int(img.height * max_w / img.width)),
                              Image.LANCZOS)
         # 听力题配的是整页图, 太高会超出卡片被截断 —— 按高度再收一次
-        if img.height > 430:
-            img = img.resize((int(img.width * 430 / img.height), 430),
+        # 题目图不能太高: 听力题的四个选项要在一屏里看到
+        if img.height > max_h:
+            img = img.resize((int(img.width * max_h / img.height), max_h),
                              Image.LANCZOS)
         tkimg = ImageTk.PhotoImage(img)
         lab = tk.Label(master, image=tkimg, bg=bg, bd=0)
@@ -404,6 +405,7 @@ class MinnaTestFrame(tk.Frame):
             return
         self.les = les
         self.limit_min = int(les.get("duration_min") or 0)
+        self.les_title = str(les.get("title") or "")
         self.sections = [s for s in les["sections"] if s.get("items")]
         self.lesson_no = lesson
         self.results = self.app.db.minna_results(lesson)
@@ -747,7 +749,8 @@ class MinnaTestFrame(tk.Frame):
             box = render_rich_prompt(inner, rich, theme.CARD)
             box.pack(anchor="w", fill="x", pady=(0, 16))
         else:
-            shot = item_image(it, inner, theme.CARD, max_w=900, key="prompt_image")
+            shot = item_image(it, inner, theme.CARD, max_w=900,
+                          key="prompt_image", max_h=430)
         if rich:
             pass
         elif shot is not None:
@@ -1117,7 +1120,7 @@ class MinnaTestFrame(tk.Frame):
         score = prog["score"] if prog else sum(1 for v in self.results.values() if v)
         done_total = prog["total"] if prog else total
 
-        self.title.configure(text=f"第 {self.lesson_no} 课 · 试卷")
+        self.title.configure(text=f"{self.les_title or (chr(31532) + ' ' + str(self.lesson_no) + ' 课')} · 试卷")
         self.sub.configure(text=f"{score}/{done_total} 题答对")
         self.timer.configure(text=minna.fmt_clock(prog["seconds"] if prog else 0))
         self.timer_cap.configure(text="用时")

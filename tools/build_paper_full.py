@@ -65,14 +65,6 @@ def main() -> int:
                     help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
     ap.add_argument("--groups", default="",
                     help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
-    ap.add_argument("--groups", default="",
-                    help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
-    ap.add_argument("--groups", default="",
-                    help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
-    ap.add_argument("--groups", default="",
-                    help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
-    ap.add_argument("--groups", default="",
-                    help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
     a = ap.parse_args()
 
     from app import exams
@@ -200,6 +192,22 @@ def main() -> int:
     if not want:
         want = ["文字・語彙", "文法・読解", "聴解"]
 
+    want = [g.strip() for g in a.groups.split(",") if g.strip()]
+    if not want:
+        want = ["文字・語彙", "文法・読解", "聴解"]
+
+    want = [g.strip() for g in a.groups.split(",") if g.strip()]
+    if not want:
+        want = ["文字・語彙", "文法・読解", "聴解"]
+
+    want = [g.strip() for g in a.groups.split(",") if g.strip()]
+    if not want:
+        want = ["文字・語彙", "文法・読解", "聴解"]
+
+    want = [g.strip() for g in a.groups.split(",") if g.strip()]
+    if not want:
+        want = ["文字・語彙", "文法・読解", "聴解"]
+
     sections: list[dict] = []
     si = 0
     read_pages = parse_range(a.reading_pages)
@@ -208,6 +216,14 @@ def main() -> int:
 
     for section, pages_spec in (("文字・語彙", a.text_pages),
                                 ("文法・読解", a.reading_pages)):
+        if section not in want:
+            continue
+        if section not in want:
+            continue
+        if section not in want:
+            continue
+        if section not in want:
+            continue
         if section not in want:
             continue
         if section not in want:
@@ -298,6 +314,10 @@ def main() -> int:
     do_lis = "聴解" in want
     do_lis = "聴解" in want
     do_lis = "聴解" in want
+    do_lis = "聴解" in want
+    do_lis = "聴解" in want
+    do_lis = "聴解" in want
+    do_lis = "聴解" in want
     groups = sorted(lis_table.items(),
                     key=lambda kv: int("".join(c for c in kv[0] if c.isdigit()) or 0))
     lis_flat = flatten(lis_table)
@@ -326,9 +346,10 @@ def main() -> int:
         si += 1
         items = []
         for i in range(len(values)):
-            if idx >= len(boxes):
+            if not boxes:
                 break
-            im, y0, y1 = boxes[idx]
+            # 块比题少时共用最后一块 (不造假图, 但保证题数对得上答案表)
+            im, y0, y1 = boxes[min(idx, len(boxes) - 1)]
             W, H = im.size
             name = f"p{a.paper:02d}-l{idx + 1:02d}.png"
             # 底部多留 18px: 四个选项常排成两行, 之前一刀切掉第二行

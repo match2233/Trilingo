@@ -137,10 +137,18 @@ class MinnaTestFrame(tk.Frame):
 
         # 底部操作条 (下一大题 / 下一题 / 交卷)
         self.foot = tk.Frame(self, bg=theme.BG)
-        self.foot.pack(fill="x", padx=30, pady=(6, 16))
         self.foot_left = tk.Label(self.foot, text="", bg=theme.BG, fg=theme.MUTED,
                                   font=theme.f(9))
         self.foot_left.pack(side="left")
+        # 上一题 / 下一题: 不管答没答都能翻 (长卷子靠它跳)
+        self.prev_btn = FlatButton(self.foot, "← 上一题", self._prev_question,
+                                   bg=theme.CARD, font=theme.f(11),
+                                   padx=14, pady=8)
+        self.prev_btn.pack(side="left", padx=(14, 6))
+        self.next_btn = FlatButton(self.foot, "下一题 →", self._next_question,
+                                   bg=theme.CARD, font=theme.f(11),
+                                   padx=14, pady=8)
+        self.next_btn.pack(side="left")
         self.foot_btn = FlatButton(self.foot, "下一题", self._next_section,
                                    bg=theme.PRIMARY, fg="#FFFFFF",
                                    hover=theme.PRIMARY_DARK,
@@ -154,6 +162,9 @@ class MinnaTestFrame(tk.Frame):
                                      hover="#1B8A4B", active_bg="#1B8A4B",
                                      border=theme.SUCCESS,
                                      font=theme.f(12, "bold"), padx=22, pady=10)
+        # 子控件都建好之后再 pack, 并且排在 body 前面占位, 长题干挤不掉它
+        self.foot.pack(fill="x", padx=30, pady=(6, 12), side="bottom",
+                       before=self.body)
 
     # ------------------------------------------------------------ 听力播放器
     def _build_audio_bar(self) -> None:
@@ -303,6 +314,32 @@ class MinnaTestFrame(tk.Frame):
                         w.bind("<Button-1>",
                                lambda e, s=si, k=i: (self._jump(s, k), win.destroy()))
         return win
+
+    def _prev_question(self) -> None:
+        if self._mode != "test":
+            return
+        si, ii = self.sec_i, self.item_i
+        if ii > 0:
+            ii -= 1
+        elif si > 0:
+            si -= 1
+            ii = len(self.sections[si]["items"]) - 1
+        else:
+            return
+        self._jump(si, ii)
+
+    def _next_question(self) -> None:
+        if self._mode != "test":
+            return
+        si, ii = self.sec_i, self.item_i
+        if ii + 1 < len(self.sections[si]["items"]):
+            ii += 1
+        elif si + 1 < len(self.sections):
+            si += 1
+            ii = 0
+        else:
+            return
+        self._jump(si, ii)
 
     def _jump(self, sec_i: int, item_i: int) -> None:
         if not 0 <= sec_i < len(self.sections):
@@ -482,6 +519,11 @@ class MinnaTestFrame(tk.Frame):
                 w.pack_forget()
         if not self.foot_left.winfo_ismapped():
             self.foot_left.pack(side="left")
+        # 上一题/下一题是常驻按钮, 清完要摆回来 (之前被这里顺手清掉了)
+        if not self.prev_btn.winfo_ismapped():
+            self.prev_btn.pack(side="left", padx=(14, 6))
+        if not self.next_btn.winfo_ismapped():
+            self.next_btn.pack(side="left")
 
     def _current(self) -> dict | None:
         if 0 <= self.sec_i < len(self.sections):
@@ -672,6 +714,20 @@ class MinnaTestFrame(tk.Frame):
         shot = item_image(it, inner, theme.CARD, max_w=900, key="prompt_image")
         if shot is not None:
             shot.pack(anchor="w", pady=(0, 16))
+        elif len(it["prompt"]) > 140:
+            # 长文章 (読解): 放进可滚动区域, 否则会把下面的选项挤出屏幕
+            box = tk.Frame(inner, bg=theme.SUNK, highlightthickness=1,
+                           highlightbackground=theme.BORDER)
+            box.pack(fill="x", pady=(0, 14))
+            txt = tk.Text(box, height=7, wrap="word", bg=theme.SUNK,
+                          fg=theme.TEXT, font=theme.f(13), bd=0,
+                          padx=12, pady=10, relief="flat")
+            txt.insert("1.0", pretty_prompt(it["prompt"]))
+            txt.configure(state="disabled")
+            sb = tk.Scrollbar(box, command=txt.yview, width=12)
+            txt.configure(yscrollcommand=sb.set)
+            sb.pack(side="right", fill="y")
+            txt.pack(side="left", fill="both", expand=True)
         else:
             tk.Label(inner, text=pretty_prompt(it["prompt"]), bg=theme.CARD,
                      fg=theme.TEXT, font=theme.f(20, "bold"), wraplength=760,

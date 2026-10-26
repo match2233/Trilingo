@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import messagebox
 
 from .. import minna
 from . import theme
@@ -80,8 +81,10 @@ class MinnaListFrame(tk.Frame):
         row = tk.Frame(btn, bg=theme.CARD)
         row.pack(fill="x", padx=12, pady=7)
 
-        name = tk.Label(row, text=f"第 {num} 课", bg=theme.CARD, fg=theme.TEXT,
-                        font=theme.f(13, "bold"), width=7, anchor="w")
+        # 标题: 单元卷用"第 N 课", 真题卷用"2016年 / 2012年12月"这种
+        label = les.get("title") or f"第 {num} 课"
+        name = tk.Label(row, text=label, bg=theme.CARD, fg=theme.TEXT,
+                        font=theme.f(13, "bold"), width=12, anchor="w")
         name.pack(side="left")
 
         bar = ProgressBar(row, width=190, height=9)
@@ -96,13 +99,25 @@ class MinnaListFrame(tk.Frame):
         spent = tk.Label(row, text="—", bg=theme.CARD, fg=theme.MUTED,
                          font=theme.f(11), width=10)
         spent.pack(side="right")
+        # 重置这一套的进度 (先问一句, 免得误点)
+        reset = tk.Label(row, text="重置", bg=theme.CARD, fg=theme.MUTED,
+                         font=theme.f(10), cursor="hand2")
+        reset.pack(side="right", padx=(0, 10))
+        reset.bind("<Button-1>", lambda e, n=num, t=label: self._reset(n, t))
 
         # 整行(含进度条与所有文字)一起高亮 + 一起可点
-        btn.bind_hover_group(row, name, pct, score, spent, bar)
+        btn.bind_hover_group(row, name, pct, score, spent, bar, reset)
         self._rows[num] = {"bar": bar, "pct": pct, "score": score,
                            "spent": spent, "label": name, "btn": btn}
 
     # ------------------------------------------------------------ 生命周期
+    def _reset(self, num: int, label: str) -> None:
+        if not messagebox.askyesno("重置", f"清空「{label}」的作答记录？",
+                                   parent=self):
+            return
+        self.app.db.minna_reset(num)
+        self.on_show(collection=self.collection)
+
     def _import(self) -> None:
         from .import_exam import ImportExamDialog
         ImportExamDialog(self, self.app, on_done=lambda: self.app.show(

@@ -57,16 +57,6 @@ def main() -> int:
     ap.add_argument("--minutes", type=int, default=105)
     ap.add_argument("--groups", default="",
                     help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
-    ap.add_argument("--groups", default="",
-                    help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
-    ap.add_argument("--groups", default="",
-                    help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
-    ap.add_argument("--groups", default="",
-                    help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
-    ap.add_argument("--groups", default="",
-                    help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
-    ap.add_argument("--groups", default="",
-                    help="只重建这些分区, 逗号分隔: 文字・語彙,文法・読解,聴解")
     a = ap.parse_args()
 
     from app import exams

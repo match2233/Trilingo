@@ -1,7 +1,7 @@
 """日语测试: 试卷集列表 (一级入口).
 
 一行一个试卷集, 比如「新标日初级上单元测试」「JLPT-N5」。
-点进去才是该试卷集的卷子列表; 收藏夹、导入试卷都挂在那一层,
+点进去才是该试卷集的卷子列表; 收藏夹就挂在那一层,
 不同试卷集之间互不干扰。
 """
 from __future__ import annotations
@@ -32,10 +32,7 @@ class ExamPickerFrame(tk.Frame):
         self.summary = tk.Label(head, text="", bg=theme.BG, fg=theme.MUTED,
                                 font=theme.f(11))
         self.summary.pack(side="right")
-        FlatButton(head, "导入试卷", self._import, bg=theme.PRIMARY, fg="#FFFFFF",
-                   hover=theme.PRIMARY_DARK, active_bg=theme.PRIMARY_DARK,
-                   border=theme.PRIMARY, font=theme.f(11, "bold"),
-                   padx=16, pady=6).pack(side="right", padx=(0, 12))
+
 
         self.list = tk.Frame(self, bg=theme.BG)
         self.list.pack(fill="both", expand=True, padx=24, pady=(8, 20))
@@ -49,7 +46,7 @@ class ExamPickerFrame(tk.Frame):
         items = sum(c["items"] for c in cols)
         self.summary.configure(text=f"{len(cols)} 套试卷集　·　{papers} 份卷子　·　{items} 题")
         if not cols:
-            tk.Label(self.list, text="还没有试卷集，点右上角【导入试卷】开始。",
+            tk.Label(self.list, text="还没有试卷集。",
                      bg=theme.BG, fg=theme.MUTED, font=theme.f(12)).pack(pady=40)
             return
         for meta in cols:
@@ -108,7 +105,3 @@ class ExamPickerFrame(tk.Frame):
     def _enter(self, cid: str) -> None:
         self.app.show("minna", collection=cid)
 
-    def _import(self) -> None:
-        from .import_exam import ImportExamDialog
-
-        ImportExamDialog(self, self.app, on_done=self.on_show)

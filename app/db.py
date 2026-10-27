@@ -16,6 +16,9 @@ from pathlib import Path
 
 from .config import DB_PATH, EN_DAILY_NEW, JP_DAILY_NEW, REVIEW_OFFSETS
 
+# 默认试卷集：老的同步数据里没有 collection 字段，一律归到这一套
+DEFAULT_COLLECTION = "shinbunpo-1"
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS en_words (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1516,16 +1519,24 @@ class Database:
         return added
 
     def export_minna(self) -> dict:
-        """每课进度 + 该课每题的判定结果."""
+        """每课进度 + 该课每题的判定结果.
+
+        外部键仍是 lesson（手机端和老的 state.json 都按这个读），但同时带上
+        `collection`，避免多试卷集时把不同卷子的同一课串在一起。
+        """
         out: dict[str, dict] = {}
         for r in self.conn.execute("SELECT * FROM minna_progress"):
             les = int(r["lesson"])
+            col = r["collection"] or DEFAULT_COLLECTION
             results = {
                 x["qid"]: bool(x["ok"])
                 for x in self.conn.execute(
-                    "SELECT qid, ok FROM minna_result WHERE lesson=?", (les,))
+                    "SELECT qid, ok FROM minna_result "
+                    "WHERE collection=? AND lesson=?", (col, les))
             }
-            out[str(les)] = {
+            key = str(les) if col == DEFAULT_COLLECTION else f"{col}:{les}"
+            out[key] = {
+                "collection": col,
                 "status": r["status"], "section": int(r["section"] or 0),
                 "idx": int(r["idx"] or 0), "seconds": int(r["seconds"] or 0),
                 "score": int(r["score"] or 0), "total": int(r["total"] or 0),
@@ -1534,40 +1545,57 @@ class Database:
         return out
 
     def apply_minna(self, minna: dict) -> int:
-        """并入另一台设备的测试进度: 每课取较新的那份."""
+        """并入另一台设备的测试进度: 同「试卷集+课」取较新的那份.
+
+        主键是 (collection, lesson)，所以合并也必须按这两列走 —— 之前写成
+        ON CONFLICT(lesson) 会直接报 "does not match any PRIMARY KEY"。
+        """
         added = 0
         for key, rec in (minna or {}).items():
             if not isinstance(rec, dict):
                 continue
+            raw = str(rec.get("collection") or "")
+            les_txt = str(key)
+            if ":" in les_txt:
+                raw = raw or les_txt.split(":", 1)[0]
+                les_txt = les_txt.split(":", 1)[1]
             try:
-                les = int(key)
+                les = int(les_txt)
             except (TypeError, ValueError):
                 continue
+            col = raw or DEFAULT_COLLECTION
             cur = self.conn.execute(
-                "SELECT updated_at FROM minna_progress WHERE lesson=?",
-                (les,)).fetchone()
+                "SELECT updated_at FROM minna_progress "
+                "WHERE collection=? AND lesson=?", (col, les)).fetchone()
             cur_at = str(cur["updated_at"] or "") if cur else ""
             new_at = str(rec.get("updated_at") or "")
-            if cur_at and new_at < cur_at:
+            if cur_at and new_at and new_at < cur_at:
                 continue
-            if cur_at and new_at == cur_at:
+            if cur_at and new_at and new_at == cur_at:
                 continue                      # 同一时刻, 以本机为准
             self.conn.execute(
                 "INSERT INTO minna_progress"
-                " (lesson,status,section,idx,seconds,score,total,started_at,finished_at,updated_at)"
-                " VALUES (?,?,?,?,?,?,?,NULL,NULL,?)"
-                " ON CONFLICT(lesson) DO UPDATE SET status=excluded.status,"
-                " section=excluded.section, idx=excluded.idx, seconds=excluded.seconds,"
-                " score=excluded.score, total=excluded.total, updated_at=excluded.updated_at",
-                (les, rec.get("status", "idle"), int(rec.get("section") or 0),
+                " (collection,lesson,status,section,idx,seconds,score,total,"
+                "  started_at,finished_at,updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,NULL,NULL,?)"
+                " ON CONFLICT(collection,lesson) DO UPDATE SET"
+                " status=excluded.status, section=excluded.section,"
+                " idx=excluded.idx, seconds=excluded.seconds,"
+                " score=excluded.score, total=excluded.total,"
+                " updated_at=excluded.updated_at",
+                (col, les, rec.get("status", "idle"), int(rec.get("section") or 0),
                  int(rec.get("idx") or 0), int(rec.get("seconds") or 0),
-                 int(rec.get("score") or 0), int(rec.get("total") or 0), new_at or _now()),
+                 int(rec.get("score") or 0), int(rec.get("total") or 0),
+                 new_at or _now()),
             )
-            self.conn.execute("DELETE FROM minna_result WHERE lesson=?", (les,))
+            self.conn.execute(
+                "DELETE FROM minna_result WHERE collection=? AND lesson=?",
+                (col, les))
             for qid, ok in (rec.get("results") or {}).items():
                 self.conn.execute(
-                    "INSERT OR REPLACE INTO minna_result (lesson,qid,ok) VALUES (?,?,?)",
-                    (les, qid, 1 if ok else 0),
+                    "INSERT OR REPLACE INTO minna_result "
+                    " (collection,lesson,qid,ok) VALUES (?,?,?,?)",
+                    (col, les, qid, 1 if ok else 0),
                 )
             added += 1
         if added:

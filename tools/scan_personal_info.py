@@ -14,6 +14,16 @@ STRICT = {
 # 生日字面量里 2026-xx-xx 这类文档/注释日期是正常的，排除 2025/2026
 OK_YEARS = ("2025", "2026")
 
+# 只在历史检查里用的"线索串"，从本机资料文件读，避免把真实数值写进源码
+_prof = pathlib.Path(r"C:/Users/<user>\Desktop\trilingo\data\fit_profile.json")
+try:
+    import json as _json
+    _d = _json.loads(_prof.read_text(encoding="utf-8"))
+    HEIGHT_HINT = f"{_d.get('height_cm', '')}cm" if _d.get("height_cm") else ""
+    BIRTH_HINT = str(_d.get("birth") or "")
+except Exception:
+    HEIGHT_HINT = BIRTH_HINT = ""
+
 tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True,
                          text=True, encoding="utf-8").stdout.splitlines()
 
@@ -43,7 +53,8 @@ for h in hits[:20]:
     print(f"  [{h[0]}] {h[1]}:{h[2]}  {h[3]}")
 
 print("\n=== git 全历史 ===")
-for pat in ("", ""):
+# 注意: 这里不要写死具体的身高/生日数值 —— 扫描器自己也会被提交进仓库
+for pat in filter(None, (HEIGHT_HINT, BIRTH_HINT)):
     out = subprocess.run(["git", "log", "--oneline", "-S", pat, "--all"],
                          cwd=ROOT, capture_output=True, text=True,
                          encoding="utf-8").stdout.strip()

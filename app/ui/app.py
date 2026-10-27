@@ -74,6 +74,15 @@ class TrilingoApp(tk.Tk):
             from .database import DatabaseFrame
 
             return DatabaseFrame(self.container, self)
+        if name == "fit_strength":
+            from .fit_strength import FitStrengthFrame
+            return FitStrengthFrame(self.container, self)
+        if name == "fit_cardio":
+            from .fit_cardio import FitCardioFrame
+            return FitCardioFrame(self.container, self)
+        if name == "fit_ai":
+            from .fit_ai import FitAiFrame
+            return FitAiFrame(self.container, self)
         if name == "fitness":
             from .fitness import FitnessFrame
             return FitnessFrame(self.container, self)

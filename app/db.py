@@ -181,6 +181,15 @@ CREATE TABLE IF NOT EXISTS fit_cardio (
 );
 CREATE INDEX IF NOT EXISTS idx_fit_cardio_day ON fit_cardio(day, kind);
 
+-- AI 报告历史：每次点周报/月报/半年报存一份，界面上按日期列出来
+CREATE TABLE IF NOT EXISTS fit_report (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    at         TEXT NOT NULL,
+    kind       TEXT NOT NULL,          -- week / month / half
+    content    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fit_report_at ON fit_report(at);
+
 
 -- ---------------------------------------------------------------- 新标日测试
 -- 题库本身是 data/minna_tests.json (桌面与 PWA 共用同一份), 这里只存进度。
@@ -1665,4 +1674,55 @@ class Database:
         return {"weight": w[1] if w else None,
                 "sets": sum(sets.values()),
                 "moves": len(sets)}
+
+    # ------------------------------------------------ 肌薄：历史与报告
+    def fit_log_history(self, limit_days: int = 120) -> list[dict]:
+        """力量训练历史：按天+动作聚合，最近的在前。"""
+        since = (dt.date.today() - dt.timedelta(days=limit_days)).isoformat()
+        rows = self.conn.execute(
+            "SELECT day, move, COUNT(*) n, MIN(at) first_at, MAX(at) last_at "
+            "FROM fit_log WHERE day>=? GROUP BY day, move "
+            "ORDER BY day DESC, last_at DESC", (since,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def fit_log_day_totals(self, limit_days: int = 120) -> list[dict]:
+        since = (dt.date.today() - dt.timedelta(days=limit_days)).isoformat()
+        rows = self.conn.execute(
+            "SELECT day, COUNT(*) sets, COUNT(DISTINCT move) moves "
+            "FROM fit_log WHERE day>=? GROUP BY day ORDER BY day DESC",
+            (since,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def fit_cardio_all(self, kind: str | None = None) -> list[dict]:
+        sql = "SELECT at, day, kind, km, minutes, hr FROM fit_cardio"
+        args: list = []
+        if kind:
+            sql += " WHERE kind=?"
+            args.append(kind)
+        sql += " ORDER BY at DESC"
+        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+
+    def fit_report_add(self, kind: str, content: str) -> int:
+        at = dt.datetime.now().replace(microsecond=0).isoformat()
+        cur = self.conn.execute(
+            "INSERT INTO fit_report (at, kind, content) VALUES (?,?,?)",
+            (at, kind, content))
+        self.conn.commit()
+        return int(cur.lastrowid)
+
+    def fit_reports(self, limit: int = 50) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT id, at, kind, content FROM fit_report "
+            "ORDER BY at DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def fit_report_get(self, rid: int) -> dict | None:
+        r = self.conn.execute(
+            "SELECT id, at, kind, content FROM fit_report WHERE id=?",
+            (rid,)).fetchone()
+        return dict(r) if r else None
+
+    def fit_weight_delete_all(self) -> None:
+        self.conn.execute("DELETE FROM fit_weight")
+        self.conn.commit()
 

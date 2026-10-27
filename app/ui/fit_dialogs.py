@@ -9,6 +9,8 @@ import tkinter as tk
 
 from .. import fit
 from . import theme
+from tkinter import messagebox
+
 from .widgets import FlatButton, center_window, style_treeview
 
 KIND_LABEL = {"week": "周报", "month": "月报", "half": "半年报"}
@@ -134,8 +136,15 @@ class ReportHistory:
         head.pack(fill="x", padx=20, pady=(16, 6))
         tk.Label(head, text="AI 报告历史", bg=theme.BG, fg=theme.TEXT,
                  font=theme.f(15, "bold")).pack(side="left")
+        self.count = tk.Label(head, text="", bg=theme.BG, fg=theme.MUTED,
+                              font=theme.f(10))
+        self.count.pack(side="left", padx=10)
         FlatButton(head, "关闭", win.destroy, bg=theme.CARD, font=theme.f(10),
                    padx=14, pady=5).pack(side="right")
+        FlatButton(head, "删除选中", self._delete, bg=theme.ERROR_SOFT,
+                   fg=theme.ERROR, hover=theme.ERROR_SOFT, font=theme.f(10),
+                   padx=14, pady=5, border=theme.ERROR_SOFT
+                   ).pack(side="right", padx=(0, 8))
 
         body = tk.Frame(win, bg=theme.BG)
         body.pack(fill="both", expand=True, padx=20, pady=(6, 16))
@@ -158,13 +167,36 @@ class ReportHistory:
         self.text.pack(fill="both", expand=True)
         self.text.configure(state="disabled")
 
-        self.reports = app.db.fit_reports(100)
+        self._reload()
+
+    def _reload(self, keep: int | None = None) -> None:
+        self.listbox.delete(0, "end")
+        self.reports = self.app.db.fit_reports(200)
         for r in self.reports:
-            label = f'{r["at"][:16].replace("T", " ")}  {KIND_LABEL.get(r["kind"], r["kind"])}'
+            label = (f'{r["at"][:16].replace("T", " ")}  '
+                     f'{KIND_LABEL.get(r["kind"], r["kind"])}')
             self.listbox.insert("end", label)
-        if self.reports:
-            self.listbox.selection_set(0)
-            self._show(self.reports[0]["content"])
+        self.count.configure(text=f"共 {len(self.reports)} 份")
+        if not self.reports:
+            self._show("还没有报告。")
+            return
+        idx = 0 if keep is None else min(keep, len(self.reports) - 1)
+        self.listbox.selection_set(idx)
+        self.listbox.activate(idx)
+        self._show(self.reports[idx]["content"])
+
+    def _delete(self) -> None:
+        sel = self.listbox.curselection()
+        if not sel or not self.reports:
+            return
+        idx = sel[0]
+        r = self.reports[idx]
+        label = f'{r["at"][:16].replace("T", " ")} {KIND_LABEL.get(r["kind"], r["kind"])}'
+        if not messagebox.askyesno("删除报告", f"确定删除这份报告吗？\n\n{label}",
+                                   parent=self.win):
+            return
+        self.app.db.fit_report_delete(r["id"])
+        self._reload(keep=idx)
 
     def _on_pick(self, _evt=None) -> None:
         sel = self.listbox.curselection()

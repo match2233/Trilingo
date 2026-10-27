@@ -15,7 +15,7 @@ from .fit_dialogs import StrengthHistory
 from .widgets import Card, FlatButton, ScrollFrame
 
 ASSETS = pathlib.Path(__file__).resolve().parent.parent.parent / "assets" / "fitness"
-IMG_W, IMG_H = 300, 176
+IMG_W, IMG_H = 368, 214
 
 # 练的部位 -> 边框颜色
 PART_COLOR = {1: theme.ERROR, 2: theme.BLUE, 3: theme.SUCCESS}
@@ -101,7 +101,12 @@ class FitStrengthFrame(tk.Frame):
         today = dt.date.today().isoformat()
         done = self.app.db.fit_sets_day(today)
 
+        # 三列等宽并且**随窗口拉伸** —— 不设权重的话列宽只按内容算，
+        # 窗口一宽右边就空出一大条。
         per_row = 3
+        for c in range(per_row):
+            self.grid_box.grid_columnconfigure(c, weight=1, uniform="mv")
+
         for i, mv in enumerate(fit.MOVES):
             self._card(self.grid_box, mv, i, per_row, done.get(mv["slug"], 0))
 
@@ -126,6 +131,7 @@ class FitStrengthFrame(tk.Frame):
                                                        text="（无图）", height=8)
         if img:
             pic.image = img
+        # 图片卡片横向铺满，图片在卡片里居中
         pic.pack(fill="x")
 
         name = tk.Label(box, text=mv["cn"], bg=soft, fg=theme.TEXT,

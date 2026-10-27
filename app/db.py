@@ -1775,6 +1775,10 @@ class Database:
             "ORDER BY at DESC LIMIT ?", (limit,)).fetchall()
         return [dict(r) for r in rows]
 
+    def fit_report_delete(self, rid: int) -> None:
+        self.conn.execute("DELETE FROM fit_report WHERE id=?", (rid,))
+        self.conn.commit()
+
     def fit_report_get(self, rid: int) -> dict | None:
         r = self.conn.execute(
             "SELECT id, at, kind, content FROM fit_report WHERE id=?",

@@ -1651,6 +1651,11 @@ class Database:
             (since,)).fetchall()
         return {r["move"]: int(r["n"]) for r in rows}
 
+    def fit_last_training_day(self) -> str | None:
+        """最近一次力量训练是哪天（没练过返回 None）。"""
+        r = self.conn.execute("SELECT MAX(day) d FROM fit_log").fetchone()
+        return r["d"] if r and r["d"] else None
+
     def fit_days_since(self, since: str) -> list[str]:
         rows = self.conn.execute(
             "SELECT DISTINCT day FROM fit_log WHERE day>=? ORDER BY day",
@@ -1694,11 +1699,19 @@ class Database:
     def fit_log_history(self, limit_days: int = 120) -> list[dict]:
         """力量训练历史：按天+动作聚合，最近的在前。"""
         since = (dt.date.today() - dt.timedelta(days=limit_days)).isoformat()
+        # dumbbell / reps 必须取**当天最后一次**的值，不能用 MAX()：
+        # 字符串比较会让 "5" > "10"，重量加上去以后历史就显示错了。
         rows = self.conn.execute(
-            "SELECT day, move, COUNT(*) n, MIN(at) first_at, MAX(at) last_at, "
-            "       MAX(dumbbell) dumbbell, MAX(reps) reps "
-            "FROM fit_log WHERE day>=? GROUP BY day, move "
-            "ORDER BY day DESC, last_at DESC", (since,)).fetchall()
+            "SELECT g.day, g.move, g.n, g.first_at, g.last_at, "
+            "       (SELECT dumbbell FROM fit_log x "
+            "         WHERE x.day=g.day AND x.move=g.move "
+            "         ORDER BY x.at DESC, x.id DESC LIMIT 1) dumbbell, "
+            "       (SELECT reps FROM fit_log y "
+            "         WHERE y.day=g.day AND y.move=g.move "
+            "         ORDER BY y.at DESC, y.id DESC LIMIT 1) reps "
+            "FROM (SELECT day, move, COUNT(*) n, MIN(at) first_at, MAX(at) last_at "
+            "      FROM fit_log WHERE day>=? GROUP BY day, move) g "
+            "ORDER BY g.day DESC, g.last_at DESC", (since,)).fetchall()
         return [dict(r) for r in rows]
 
     def fit_log_day_totals(self, limit_days: int = 120) -> list[dict]:

@@ -102,23 +102,43 @@ class FitStrengthFrame(tk.Frame):
         done = self.app.db.fit_sets_day(today)
         since = (dt.date.today() - dt.timedelta(days=30)).isoformat()
         usage = self.app.db.fit_sets_since(since)
-        moves = sorted(fit.MOVES,
-                       key=lambda m: (-usage.get(m["slug"], 0), fit.MOVES.index(m)))
 
-        per_row = 3
-        for i, mv in enumerate(moves):
-            self._card(i, mv, per_row, done.get(mv["slug"], 0))
+        total = 0
+        for day_no, day_name, parts, slugs in fit.DAY_PLAN:
+            color = PART_COLOR.get(day_no, theme.BORDER)
+            head = tk.Frame(self.grid_box, bg=theme.BG)
+            head.pack(fill="x", pady=(12 if total else 0, 4))
+            tk.Frame(head, bg=color, width=4, height=20).pack(side="left")
+            tk.Label(head, text=f"DAY {day_no}  {day_name}", bg=theme.BG,
+                     fg=color, font=theme.f(13, "bold")).pack(side="left", padx=8)
+            tk.Label(head, text=parts, bg=theme.BG, fg=theme.MUTED,
+                     font=theme.f(10)).pack(side="left")
+            day_sets = sum(done.get(sg, 0) for sg in slugs)
+            tk.Label(head, text=f"今日 {day_sets} 组" if day_sets else "",
+                     bg=theme.BG, fg=color, font=theme.f(10, "bold")
+                     ).pack(side="right")
+
+            grid = tk.Frame(self.grid_box, bg=theme.BG)
+            grid.pack(fill="x")
+            for c in range(3):
+                grid.grid_columnconfigure(c, weight=1, uniform="mv")
+
+            ordered = sorted(slugs, key=lambda sg: -usage.get(sg, 0))
+            for i, slug in enumerate(ordered):
+                self._card(grid, fit.MOVE_BY_SLUG[slug], i, 3,
+                           done.get(slug, 0))
+                total += 1
+
         self.today.configure(
             text=f"今日 {sum(done.values())} 组 · {len(done)} 个动作"
             if done else "今日还没开始")
 
-    def _card(self, idx: int, mv: dict, per_row: int, done: int) -> None:
+    def _card(self, parent, mv: dict, idx: int, per_row: int, done: int) -> None:
         color = PART_COLOR.get(mv["day"], theme.BORDER)
-        cell = Card(self.grid_box)
+        cell = Card(parent)
         cell.configure(highlightbackground=color, highlightthickness=2)
         cell.grid(row=idx // per_row, column=idx % per_row,
                   padx=6, pady=6, sticky="nsew")
-        self.grid_box.grid_columnconfigure(idx % per_row, weight=1, uniform="mv")
 
         soft = PART_SOFT.get(mv["day"], theme.SUNK)
         box = tk.Frame(cell, bg=soft)

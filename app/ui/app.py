@@ -319,8 +319,49 @@ class MenuFrame(tk.Frame):
         return btn
 
     # ------------------------------------------------------------ 刷新
+
+
+    # ------------------------------------------------------------ 训练提醒
+    def fit_inactivity_check(self) -> None:
+        """连续 4 天没有力量训练记录就提醒一次（每天最多弹一回）。
+
+        主界面上弹，不打扰答题页；今天已经提醒过就记在 fit_setting 里，
+        免得每次回主界面都弹。
+        """
+        import datetime as dt
+        from tkinter import messagebox
+
+        db = self.app.db
+        today = dt.date.today()
+        last = db.fit_last_training_day()
+        if last:
+            gap = (today - dt.date.fromisoformat(last)).days
+        else:
+            gap = 99
+        if gap < 4:
+            return
+        if db.fit_setting("fit_warned_at", "") == today.isoformat():
+            return
+        db.fit_set_setting("fit_warned_at", today.isoformat())
+
+        today_sets = db.fit_sets_day(today.isoformat())
+        if today_sets:
+            return
+        if last:
+            head = f"已经连续 {gap} 天没有力量训练记录了。"
+            detail = f"上次训练是 {last}。"
+        else:
+            head = "还没有任何力量训练记录。"
+            detail = "先记一组也算开始。"
+        messagebox.showwarning(
+            "该练了",
+            f"{head}\n{detail}\n\n"
+            "今天做一组哑铃动作就算打卡（点动作卡片即可）。\n"
+            "目标：增肌增重，断练超过 3 天训练效果会明显掉。")
+
     def on_show(self, **_):
         self.streak_label.configure(text=f"{self.app.db.streak()} 天")
+        self.fit_inactivity_check()
 
         for lang, btn in (("en", self.btn_en), ("jp", self.btn_jp)):
             answered, total = self.app.db.today_status(lang)

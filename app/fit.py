@@ -46,6 +46,21 @@ MOVES: list[dict] = [
 
 MOVE_BY_SLUG = {m["slug"]: m for m in MOVES}
 
+# 训练计划的编排：三天、共 17 个动作条目。
+# 肩推 / 面拉 / 侧平举在「推日/拉日」和「腿日」都会出现，按原计划重复列，
+# 但共用同一个 slug —— 计数和历史上仍然算同一个动作。
+DAY_PLAN: list[tuple[int, str, str, list[str]]] = [
+    (1, "推日", "胸 / 肩 / 三头",
+     ["incline-press", "bench-press", "shoulder-press",
+      "lateral-raise", "triceps-ext"]),
+    (2, "拉日", "背 / 二头",
+     ["rdl", "bent-row", "single-row",
+      "reverse-fly", "face-pull", "bicep-curl"]),
+    (3, "腿日", "腿 / 臀 / 腹",
+     ["goblet-squat", "shoulder-press", "face-pull",
+      "lateral-raise", "crunch", "hip-thrust"]),
+]
+
 # 用户基本情况（用于 AI 建议与 BMI）
 PROFILE = {"sex": "male", "height_cm": 0, "birth": ""}
 

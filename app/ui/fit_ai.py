@@ -61,43 +61,73 @@ class FitAiFrame(tk.Frame):
 
     # ------------------------------------------------------------ 数据
     def _digest(self, days: int) -> str:
+        """把这段时间的数据整理成给模型的材料 —— 越具体，建议越不空泛。"""
         db = self.app.db
-        since = (dt.date.today() - dt.timedelta(days=days)).isoformat()
+        today = dt.date.today()
+        since = (today - dt.timedelta(days=days)).isoformat()
         lines = [f"统计区间：最近 {days} 天（{since} 起）",
                  f"用户：男，{fit.PROFILE['height_cm']}cm，"
                  f"{fit.age_on()} 岁，目标增重增肌、每天至少不比前一天轻松"]
+
+        # 体重：期初/期末/斜率 + 最近几个点
         ws = [(at, kg) for at, kg in db.fit_weight_all() if at[:10] >= since]
         if ws:
             daily = fit.daily_mean(ws)
             first, last = daily[0][1], daily[-1][1]
+            recent = "、".join(f"{d.strftime('%m-%d')} {v}kg"
+                              for d, v in daily[-5:])
             lines.append(
-                f"体重：{len(ws)} 次记录 / {len(daily)} 天；期初 {first}kg，"
-                f"期末 {last}kg，变化 {last - first:+.1f}kg；"
-                f"趋势 {fit.trend_slope(daily):+.2f} kg/周；BMI {fit.bmi(last)}")
+                f"体重：{len(ws)} 次记录 / {len(daily)} 天；期初 {first}kg → "
+                f"期末 {last}kg（{last - first:+.1f}kg）；趋势 "
+                f"{fit.trend_slope(daily):+.2f} kg/周；BMI {fit.bmi(last)}；"
+                f"最近几天：{recent}")
         else:
             lines.append("体重：这段时间没有记录")
 
-        sets = db.fit_sets_since(since)
-        days_done = db.fit_days_since(since)
-        top = sorted(sets.items(), key=lambda kv: -kv[1])[:6]
-        if sets:
+        # 力量训练：每天的组数分布 + 每个动作的组数
+        rows = [r for r in db.fit_log_history(days)]
+        if rows:
+            per_day: dict[str, int] = {}
+            per_move: dict[str, int] = {}
+            for r in rows:
+                per_day[r["day"]] = per_day.get(r["day"], 0) + r["n"]
+                per_move[r["move"]] = per_move.get(r["move"], 0) + r["n"]
+            trained = len(per_day)
+            gaps = []
+            last_day = max(per_day)
+            gap_now = (today - dt.date.fromisoformat(last_day)).days
+            for i in range(days):
+                d = (today - dt.timedelta(days=days - 1 - i)).isoformat()
+                gaps.append("练" if per_day.get(d) else "·")
+            detail = "、".join(
+                f"{d} {n}组" for d, n in sorted(per_day.items())[-7:])
+            moves = "、".join(
+                f"{fit.MOVE_BY_SLUG.get(k, {}).get('cn', k)}{v}组"
+                for k, v in sorted(per_move.items(), key=lambda kv: -kv[1]))
             lines.append(
-                f"力量训练：{len(days_done)} 天打卡，共 {sum(sets.values())} 组；"
-                "主要动作 " + "、".join(
-                    f"{fit.MOVE_BY_SLUG.get(k, {}).get('cn', k)}{v}组"
-                    for k, v in top))
+                f"力量训练：{trained} 天有打卡（{trained}/{days}），共 "
+                f"{sum(per_move.values())} 组；最近一次是 {last_day}"
+                f"（距今 {gap_now} 天）")
+            lines.append(f"  逐日：{''.join(gaps)}（左旧右新，练=有打卡）")
+            lines.append(f"  最近几天：{detail}")
+            lines.append(f"  各动作：{moves}")
         else:
-            lines.append("力量训练：这段时间没有打卡")
+            lines.append(f"力量训练：最近 {days} 天一次都没练")
 
+        # 有氧
         cardio = db.fit_cardio_since(since)
         runs = [c for c in cardio if c["kind"] == "run"]
         bikes = [c for c in cardio if c["kind"] == "bike"]
         if runs or bikes:
+            rk = sum(c["km"] for c in runs)
+            bk = sum(c["km"] for c in bikes)
+            hr = [c["hr"] for c in runs if c["hr"]]
             lines.append(
-                f"有氧：跑步 {len(runs)} 次 {sum(c['km'] for c in runs):.1f}km，"
-                f"骑行 {len(bikes)} 次 {sum(c['km'] for c in bikes):.1f}km")
+                f"有氧：跑步 {len(runs)} 次 {rk:.1f}km"
+                + (f"（平均心率 {sum(hr)//len(hr)}）" if hr else "")
+                + f"；骑行 {len(bikes)} 次 {bk:.1f}km")
         else:
-            lines.append("有氧：这段时间没有记录")
+            lines.append(f"有氧：最近 {days} 天没有记录")
         return "\n".join(lines)
 
     def _run(self, key: str) -> None:
@@ -118,11 +148,17 @@ class FitAiFrame(tk.Frame):
                     "model": cfg["model"],
                     "messages": [
                         {"role": "system", "content":
-                         "你是健身教练。根据用户的训练与体重数据写一份"
-                         f"{label}。要求：1) 用数据说话；2) 给出下一步具体建议"
-                         "（组数/次数/频率/饮食/睡眠）；3) 有风险就明确预警"
-                         "（掉体重过快、训练量骤降、连续缺练等）；"
-                         "4) 语气直接不客套，400 字以内。"},
+                         f"""你是私人健身教练，给用户写{label}。用户目标：增重增肌、长期坚持、每天不比前一天轻松。
+
+必须严格按下面五段输出（用短标题，不要多余寒暄）：
+一、结论：一句话说清这{label}是"练够了/没练够"、"吃够了/没吃够"。
+二、最大问题：只挑最致命的**一个**，用数据点出来（例如"7 天只练 1 次"）。
+三、本周唯一重点：一个具体可执行的动作，带数字（组数×次数×重量，或每日热量/蛋白）。
+四、次要建议：最多 3 条，每条都要带数字，不要空话。
+五、预警：只在确实有风险时写（体重连续下降、连续缺练、训练量骤降），否则写"无"。
+
+硬性要求：每个判断后面跟数据；不要泛泛而谈"要均衡饮食""注意休息"；
+不要复述我给的数据；总字数 350 字以内。"""},
                         {"role": "user", "content": digest},
                     ],
                     "temperature": 0.4,

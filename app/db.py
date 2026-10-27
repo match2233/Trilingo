@@ -143,6 +143,45 @@ CREATE TABLE IF NOT EXISTS deer (
     at         TEXT NOT NULL
 );
 
+-- ---------------------------------------------------------------- 肌薄（身体训练）
+-- 体重记录保留**精确到秒的时间戳**：同一天早晚、饭前饭后、冬夏衣服差别能有 1kg+，
+-- 没有时刻就没法解释波动，也没法按天取平均画趋势。
+CREATE TABLE IF NOT EXISTS fit_weight (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    at         TEXT NOT NULL,          -- ISO 'YYYY-MM-DDTHH:MM:SS'（本地时间）
+    day        TEXT NOT NULL,          -- 冗余一列，方便按天聚合
+    kg         REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fit_weight_day ON fit_weight(day);
+
+-- 长期设置：哑铃重量、每个动作的一组次数……改一次管到下次修改
+CREATE TABLE IF NOT EXISTS fit_setting (
+    k          TEXT PRIMARY KEY,
+    v          TEXT NOT NULL
+);
+
+-- 力量训练打卡：点一次动作按钮插一行（同一天同一动作可以有多行 = 多组）
+CREATE TABLE IF NOT EXISTS fit_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    at         TEXT NOT NULL,
+    day        TEXT NOT NULL,
+    move       TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fit_log_day ON fit_log(day, move);
+
+-- 有氧：跑步 km/min/hr；骑行只有 km/min
+CREATE TABLE IF NOT EXISTS fit_cardio (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    at         TEXT NOT NULL,
+    day        TEXT NOT NULL,
+    kind       TEXT NOT NULL,          -- run / bike
+    km         REAL NOT NULL DEFAULT 0,
+    minutes    REAL NOT NULL DEFAULT 0,
+    hr         INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_fit_cardio_day ON fit_cardio(day, kind);
+
+
 -- ---------------------------------------------------------------- 新标日测试
 -- 题库本身是 data/minna_tests.json (桌面与 PWA 共用同一份), 这里只存进度。
 -- 进度**不参与跨设备同步**: 每台设备各记各的, 避免再动那套脆弱的事件同步。
@@ -1522,3 +1561,108 @@ class Database:
         if added:
             self.conn.commit()
         return added
+
+    # ---------------------------------------------------------------- 肌薄（身体训练）
+    def fit_weight_add(self, kg: float, at: str | None = None) -> None:
+        """记一条体重。时刻精确到秒 —— 一天里不同时间体重能差 1kg 以上。"""
+        at = at or dt.datetime.now().replace(microsecond=0).isoformat()
+        day = at[:10]
+        self.conn.execute(
+            "INSERT INTO fit_weight (at, day, kg) VALUES (?,?,?)", (at, day, kg))
+        self.conn.commit()
+
+    def fit_weight_all(self) -> list[tuple[str, float]]:
+        rows = self.conn.execute(
+            "SELECT at, kg FROM fit_weight ORDER BY at").fetchall()
+        return [(r["at"], float(r["kg"])) for r in rows]
+
+    def fit_weight_delete(self, wid: int) -> None:
+        self.conn.execute("DELETE FROM fit_weight WHERE id=?", (wid,))
+        self.conn.commit()
+
+    def fit_weight_last(self) -> tuple[str, float] | None:
+        r = self.conn.execute(
+            "SELECT at, kg FROM fit_weight ORDER BY at DESC LIMIT 1").fetchone()
+        return (r["at"], float(r["kg"])) if r else None
+
+    def fit_setting(self, k: str, default: str = "") -> str:
+        r = self.conn.execute(
+            "SELECT v FROM fit_setting WHERE k=?", (k,)).fetchone()
+        return r["v"] if r else default
+
+    def fit_set_setting(self, k: str, v: str) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO fit_setting (k, v) VALUES (?,?)", (k, str(v)))
+        self.conn.commit()
+
+    def fit_log_add(self, move: str, at: str | None = None) -> int:
+        """点一次动作 = 记一组。返回今天该动作的累计组数。"""
+        at = at or dt.datetime.now().replace(microsecond=0).isoformat()
+        day = at[:10]
+        self.conn.execute(
+            "INSERT INTO fit_log (at, day, move) VALUES (?,?,?)", (at, day, move))
+        self.conn.commit()
+        return self.fit_sets_day(day).get(move, 0)
+
+    def fit_log_undo(self, move: str) -> int:
+        """撤销一次（点错了）。返回剩余组数。"""
+        day = dt.date.today().isoformat()
+        row = self.conn.execute(
+            "SELECT id FROM fit_log WHERE day=? AND move=? ORDER BY id DESC LIMIT 1",
+            (day, move)).fetchone()
+        if row:
+            self.conn.execute("DELETE FROM fit_log WHERE id=?", (row["id"],))
+            self.conn.commit()
+        return self.fit_sets_day(day).get(move, 0)
+
+    def fit_sets_day(self, day: str) -> dict[str, int]:
+        rows = self.conn.execute(
+            "SELECT move, COUNT(*) n FROM fit_log WHERE day=? GROUP BY move",
+            (day,)).fetchall()
+        return {r["move"]: int(r["n"]) for r in rows}
+
+    def fit_sets_since(self, since: str) -> dict[str, int]:
+        rows = self.conn.execute(
+            "SELECT move, COUNT(*) n FROM fit_log WHERE day>=? GROUP BY move",
+            (since,)).fetchall()
+        return {r["move"]: int(r["n"]) for r in rows}
+
+    def fit_days_since(self, since: str) -> list[str]:
+        rows = self.conn.execute(
+            "SELECT DISTINCT day FROM fit_log WHERE day>=? ORDER BY day",
+            (since,)).fetchall()
+        return [r["day"] for r in rows]
+
+    def fit_log_all(self) -> list[tuple[str, str]]:
+        rows = self.conn.execute(
+            "SELECT day, move FROM fit_log ORDER BY day").fetchall()
+        return [(r["day"], r["move"]) for r in rows]
+
+    def fit_cardio_add(self, kind: str, km: float, minutes: float,
+                       hr: int = 0, at: str | None = None) -> None:
+        at = at or dt.datetime.now().replace(microsecond=0).isoformat()
+        self.conn.execute(
+            "INSERT INTO fit_cardio (at, day, kind, km, minutes, hr) "
+            "VALUES (?,?,?,?,?,?)", (at, at[:10], kind, km, minutes, hr))
+        self.conn.commit()
+
+    def fit_cardio_since(self, since: str, kind: str | None = None
+                         ) -> list[dict]:
+        sql = ("SELECT at, day, kind, km, minutes, hr FROM fit_cardio "
+               "WHERE day>=?")
+        args: list = [since]
+        if kind:
+            sql += " AND kind=?"
+            args.append(kind)
+        sql += " ORDER BY at"
+        return [dict(r) for r in self.conn.execute(sql, args).fetchall()]
+
+    def fit_summary(self) -> dict:
+        """给菜单卡片用的一行摘要。"""
+        w = self.fit_weight_last()
+        today = dt.date.today().isoformat()
+        sets = self.fit_sets_day(today)
+        return {"weight": w[1] if w else None,
+                "sets": sum(sets.values()),
+                "moves": len(sets)}
+

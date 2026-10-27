@@ -29,13 +29,13 @@ class LifeFrame(tk.Frame):
         self.summary = tk.Label(head, text="", bg=theme.BG, fg=theme.MUTED, font=theme.f(10))
         self.summary.pack(side="right")
 
-        tk.Label(self, text="记账与记鹿都会随同步在设备间共享",
+        tk.Label(self, text="记账与记鹿会随同步在设备间共享；肌薄只存本机",
                  bg=theme.BG, fg=theme.MUTED, font=theme.f(10)).pack(anchor="w", padx=32)
 
         grid = tk.Frame(self, bg=theme.BG)
         grid.pack(fill="both", expand=True, padx=30, pady=(14, 26))
         grid.grid_rowconfigure(0, weight=1)
-        for c in (0, 1):
+        for c in (0, 1, 2):
             grid.grid_columnconfigure(c, weight=1, uniform="life")
 
         self.tiles: dict[str, tuple[Card, FlatButton]] = {}
@@ -43,6 +43,8 @@ class LifeFrame(tk.Frame):
                    theme.PRIMARY, theme.PRIMARY_SOFT)
         self._tile(grid, 1, "deer", "记鹿", "每天记一次 · 月历/年历统计", "🦌",
                    theme.SUCCESS, theme.SUCCESS_SOFT)
+        self._tile(grid, 2, "fitness", "肌薄", "体重 · 力量 · 有氧 · AI 建议", "🏋",
+                   theme.BLUE, theme.BLUE_SOFT)
 
     def _tile(self, parent, col, key, title, sub, glyph, color, soft) -> None:
         """整张大卡片都是点击热区, 悬停时整块一起染色.
@@ -51,8 +53,7 @@ class LifeFrame(tk.Frame):
         否则鼠标移过去既没有高亮也点不进去。
         """
         card = Card(parent)
-        card.grid(row=0, column=col, sticky="nsew",
-                  padx=(0, 10) if col == 0 else (10, 0))
+        card.grid(row=0, column=col, sticky="nsew", padx=(0, 8) if col == 0 else (8, 0))
         box = tk.Frame(card, bg=theme.CARD)
         box.pack(fill="both", expand=True)
 

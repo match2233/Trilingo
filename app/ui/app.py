@@ -74,6 +74,9 @@ class TrilingoApp(tk.Tk):
             from .database import DatabaseFrame
 
             return DatabaseFrame(self.container, self)
+        if name == "fitness":
+            from .fitness import FitnessFrame
+            return FitnessFrame(self.container, self)
         if name == "life":
             from .life import LifeFrame
 
@@ -266,7 +269,7 @@ class MenuFrame(tk.Frame):
         self.btn_sentence = self._quad(grid, 1, 1, "句子练习", "开发中",
                                        theme.MUTED, theme.BG,
                                        lambda: self.app.show("sentence"))
-        self.life_btn = self._quad(grid, 1, 2, "生活记录", "记账 · 记鹿",
+        self.life_btn = self._quad(grid, 1, 2, "生活记录", "记账 · 记鹿 · 肌薄",
                                    theme.SUCCESS, theme.SUCCESS_SOFT,
                                    lambda: self.app.show("life"))
 
@@ -376,7 +379,7 @@ class MenuFrame(tk.Frame):
                 sign = _C.CURRENCY_SIGN[cur]
                 parts.append(f"{sign}{_C.fmt_money(t['balance'], cur)}")
                 break
-        self.life_btn.set_subtitle("　·　".join(parts) if parts else "记账 · 记鹿")
+        self.life_btn.set_subtitle("　·　".join(parts) if parts else "记账 · 记鹿 · 肌薄")
 
 def _this_month() -> tuple[int, int]:
     import datetime as dt

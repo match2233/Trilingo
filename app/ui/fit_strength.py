@@ -100,34 +100,10 @@ class FitStrengthFrame(tk.Frame):
             w.destroy()
         today = dt.date.today().isoformat()
         done = self.app.db.fit_sets_day(today)
-        since = (dt.date.today() - dt.timedelta(days=30)).isoformat()
-        usage = self.app.db.fit_sets_since(since)
 
-        total = 0
-        for day_no, day_name, parts, slugs in fit.DAY_PLAN:
-            color = PART_COLOR.get(day_no, theme.BORDER)
-            head = tk.Frame(self.grid_box, bg=theme.BG)
-            head.pack(fill="x", pady=(12 if total else 0, 4))
-            tk.Frame(head, bg=color, width=4, height=20).pack(side="left")
-            tk.Label(head, text=f"DAY {day_no}  {day_name}", bg=theme.BG,
-                     fg=color, font=theme.f(13, "bold")).pack(side="left", padx=8)
-            tk.Label(head, text=parts, bg=theme.BG, fg=theme.MUTED,
-                     font=theme.f(10)).pack(side="left")
-            day_sets = sum(done.get(sg, 0) for sg in slugs)
-            tk.Label(head, text=f"今日 {day_sets} 组" if day_sets else "",
-                     bg=theme.BG, fg=color, font=theme.f(10, "bold")
-                     ).pack(side="right")
-
-            grid = tk.Frame(self.grid_box, bg=theme.BG)
-            grid.pack(fill="x")
-            for c in range(3):
-                grid.grid_columnconfigure(c, weight=1, uniform="mv")
-
-            ordered = sorted(slugs, key=lambda sg: -usage.get(sg, 0))
-            for i, slug in enumerate(ordered):
-                self._card(grid, fit.MOVE_BY_SLUG[slug], i, 3,
-                           done.get(slug, 0))
-                total += 1
+        per_row = 3
+        for i, mv in enumerate(fit.MOVES):
+            self._card(self.grid_box, mv, i, per_row, done.get(mv["slug"], 0))
 
         self.today.configure(
             text=f"今日 {sum(done.values())} 组 · {len(done)} 个动作"

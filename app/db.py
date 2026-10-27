@@ -1608,7 +1608,7 @@ class Database:
         self.conn.commit()
 
     def _fit_migrate(self) -> None:
-        """老库补上 dumbbell / reps 两列（重复执行无副作用）。"""
+        """老库补上 dumbbell / reps 两列，并给空值补默认值（重复执行无副作用）。"""
         for col, ddl in (("dumbbell", "TEXT NOT NULL DEFAULT ''"),
                          ("reps", "TEXT NOT NULL DEFAULT ''")):
             try:
@@ -1616,6 +1616,31 @@ class Database:
             except sqlite3.OperationalError:
                 pass
         self.conn.commit()
+        self._fit_backfill_snapshot()
+
+    def _fit_backfill_snapshot(self) -> None:
+        """把加列之前的旧记录补上哑铃重量 / 每组次数。
+
+        旧记录当初没有这两列，历史里只能显示 "—"。现在用当前设置回填：
+        哑铃用 fit_setting['dumbbell']，次数优先用该动作的 reps:<slug>，
+        没有就用该动作的默认值。只补空值，不动已经有快照的记录。
+        """
+        rows = self.conn.execute(
+            "SELECT id, move FROM fit_log WHERE dumbbell='' OR reps=''"
+        ).fetchall()
+        if not rows:
+            return
+        dumbbell = self.fit_setting("dumbbell", "")
+        fixed = 0
+        for r in rows:
+            d = self.fit_setting(f"reps:{r['move']}", "")
+            self.conn.execute(
+                "UPDATE fit_log SET dumbbell=?, reps=? "
+                "WHERE id=? AND (dumbbell='' OR reps='')",
+                (dumbbell, d or "12", r["id"]))
+            fixed += 1
+        self.conn.commit()
+        # 补了多少条不打日志 —— db 层没有 logger，静默即可
 
     def fit_log_add(self, move: str, at: str | None = None,
                     dumbbell: str = "", reps: str = "") -> int:
@@ -1701,14 +1726,19 @@ class Database:
         since = (dt.date.today() - dt.timedelta(days=limit_days)).isoformat()
         # dumbbell / reps 必须取**当天最后一次**的值，不能用 MAX()：
         # 字符串比较会让 "5" > "10"，重量加上去以后历史就显示错了。
+        # 取当天最后一次的哑铃/次数；**空值回退到当前设置** —— 加列之前的
+        # 老记录没有快照，历史里应该显示现在的重量和次数，而不是 "—"。
         rows = self.conn.execute(
             "SELECT g.day, g.move, g.n, g.first_at, g.last_at, "
-            "       (SELECT dumbbell FROM fit_log x "
-            "         WHERE x.day=g.day AND x.move=g.move "
-            "         ORDER BY x.at DESC, x.id DESC LIMIT 1) dumbbell, "
-            "       (SELECT reps FROM fit_log y "
-            "         WHERE y.day=g.day AND y.move=g.move "
-            "         ORDER BY y.at DESC, y.id DESC LIMIT 1) reps "
+            "  COALESCE(NULLIF((SELECT dumbbell FROM fit_log x "
+            "     WHERE x.day=g.day AND x.move=g.move "
+            "     ORDER BY x.at DESC, x.id DESC LIMIT 1), ''), "
+            "   (SELECT v FROM fit_setting WHERE k='dumbbell'), '') dumbbell, "
+            "  COALESCE(NULLIF((SELECT reps FROM fit_log y "
+            "     WHERE y.day=g.day AND y.move=g.move "
+            "     ORDER BY y.at DESC, y.id DESC LIMIT 1), ''), "
+            "   (SELECT v FROM fit_setting WHERE k='reps:'||g.move), "
+            "   (SELECT v FROM fit_setting WHERE k='reps'), '12') reps "
             "FROM (SELECT day, move, COUNT(*) n, MIN(at) first_at, MAX(at) last_at "
             "      FROM fit_log WHERE day>=? GROUP BY day, move) g "
             "ORDER BY g.day DESC, g.last_at DESC", (since,)).fetchall()

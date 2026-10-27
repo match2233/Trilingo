@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT))
 from app import exams  # noqa: E402
 
 PY = sys.executable
-N5 = pathlib.Path(r"C:/Users/<user>\Desktop\N5")
+N5 = pathlib.Path(__file__).resolve().parent.parent / "data" / "import" / "N5"
 
 # 已经导过的标题关键字 (跳过)
 SKIP = ("2016年", "2012年12月")

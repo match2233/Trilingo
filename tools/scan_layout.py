@@ -22,7 +22,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-N5 = pathlib.Path(r"C:/Users/<user>\Desktop\N5")
+N5 = pathlib.Path(__file__).resolve().parent.parent / "data" / "import" / "N5"
 OUT = ROOT / "data" / "exams" / "n5_layout.json"
 CACHE = ROOT / "data" / "ocr"
 

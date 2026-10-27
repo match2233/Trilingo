@@ -17,7 +17,7 @@ import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "assets" / "fitness"
-DOCX = pathlib.Path(r"C:/Users/<user>\Desktop\新建 DOCX 文档.docx")
+DOCX = ROOT / "data" / "import" / "moves.docx"
 
 # docx 图片序号 -> slug（重复的 13/14/15 用第一次出现的那张）
 ORDER = [
@@ -81,7 +81,7 @@ def main() -> int:
         print("找不到 docx:", DOCX)
         return 1
     z = zipfile.ZipFile(DOCX)
-    tmp = pathlib.Path(r"C:/Users/<user>\AppData\Local\Temp\docx_media")
+    tmp = ROOT / "data" / "import" / "docx_media"
     tmp.mkdir(exist_ok=True)
 
     made = 0

@@ -391,7 +391,7 @@ def build(pdf_path: pathlib.Path) -> tuple[dict, dict]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("pdf", nargs="?",
-                    default=r"C:/Users/<user>\Downloads\7054163164000012.pdf")
+                    default=None)
     ap.add_argument("-o", "--out", default="data/minna_tests.json")
     args = ap.parse_args()
 

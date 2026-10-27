@@ -2,7 +2,7 @@ import pathlib
 import re
 import subprocess
 
-ROOT = pathlib.Path(r"C:/Users/<user>\Desktop\trilingo")
+ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 STRICT = {
     "身高+cm": r"1[5-9]\d\s*cm",
@@ -15,7 +15,7 @@ STRICT = {
 OK_YEARS = ("2025", "2026")
 
 # 只在历史检查里用的"线索串"，从本机资料文件读，避免把真实数值写进源码
-_prof = pathlib.Path(r"C:/Users/<user>\Desktop\trilingo\data\fit_profile.json")
+_prof = ROOT / "data" / "fit_profile.json"
 try:
     import json as _json
     _d = _json.loads(_prof.read_text(encoding="utf-8"))

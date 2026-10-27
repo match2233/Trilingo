@@ -3,7 +3,7 @@ import pathlib
 import re
 import sys
 
-ROOT = pathlib.Path(r"C:/Users/<user>\Desktop\trilingo")
+ROOT = pathlib.Path(__file__).resolve().parent.parent
 BANKS = {
     "upper": ROOT / "data" / "minna_tests.json",
     "lower": ROOT / "data" / "exams" / "shinbunpo-2.json",

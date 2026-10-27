@@ -11,10 +11,11 @@
 """
 from __future__ import annotations
 
+import pathlib
 import re
 import subprocess
 
-ROOT = r"C:/Users/<user>\Desktop\trilingo"
+ROOT = str(pathlib.Path(__file__).resolve().parent.parent)
 
 PATTERNS = {
     "身高": re.compile(r"1[5-9]\d\s*(cm|CM|厘米)"),

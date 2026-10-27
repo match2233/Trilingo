@@ -16,7 +16,7 @@ import sys
 import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-TXT = pathlib.Path(r"C:/Users/<user>\AppData\Local\Temp\chujixia.txt")
+TXT = ROOT / "data" / "import" / "chujixia.txt"
 
 CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩"
 CN_NUM = "一二三四五六七八九十"
@@ -166,7 +166,7 @@ def main() -> int:
         print(f"  第{l['lesson']:2d}课: {kinds}  合计 {n}")
     print("题目总数:", total)
 
-    out = pathlib.Path(r"C:/Users/<user>\Desktop\trilingo\data\ocr\chujixia_draft.json")
+    out = ROOT / "data" / "ocr" / "chujixia_draft.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps({"lessons": lessons}, ensure_ascii=False, indent=1),
                    encoding="utf-8")

@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from app import llm  # noqa: E402
 
-TXT = pathlib.Path(r"C:/Users/<user>\AppData\Local\Temp\chujixia.txt")
+TXT = ROOT / "data" / "import" / "chujixia.txt"   # 由 docx 转出的纯文本
 TITLE_RE = re.compile(r"第\s*([0-9]{2})\s*[课課]")
 CN_NUM = "一二三四五六七八九十"
 

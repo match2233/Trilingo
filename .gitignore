@@ -54,3 +54,5 @@ data/exams/*/audio/
 
 # 肌薄的原始训练计划图(3.6MB), 只提交裁好的动作示意图
 assets/fitness/day*.png
+# 肌薄的个人资料(身高/生日), 只存本机
+data/fit_profile.json

@@ -218,7 +218,8 @@ class FitnessFrame(tk.Frame):
         s = self.app.db.fit_summary()
         parts = []
         if s["weight"]:
-            parts.append(f"{s['weight']:.1f}kg · BMI {fit.bmi(s['weight'])}")
+            b = fit.bmi(s["weight"])
+            parts.append(f"{s['weight']:.1f}kg" + (f" · BMI {b}" if b else ""))
         if s["sets"]:
             parts.append(f"今日 {s['sets']} 组")
         self.summary.configure(text="　·　".join(parts) if parts else "还没有数据")

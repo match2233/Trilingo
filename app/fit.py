@@ -11,6 +11,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+import pathlib
 
 # 动作清单：slug, 中文名, 英文名, 默认次数/组, 属于哪一天, 是否核心动作
 MOVES: list[dict] = [
@@ -46,6 +48,8 @@ MOVES: list[dict] = [
 
 MOVE_BY_SLUG = {m["slug"]: m for m in MOVES}
 
+DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
+
 # 训练计划的编排：三天、共 17 个动作条目。
 # 肩推 / 面拉 / 侧平举在「推日/拉日」和「腿日」都会出现，按原计划重复列，
 # 但共用同一个 slug —— 计数和历史上仍然算同一个动作。
@@ -61,18 +65,47 @@ DAY_PLAN: list[tuple[int, str, str, list[str]]] = [
       "lateral-raise", "crunch", "hip-thrust"]),
 ]
 
-# 用户基本情况（用于 AI 建议与 BMI）
-PROFILE = {"sex": "male", "height_cm": 0, "birth": ""}
+# 个人资料（身高/生日）不写进代码仓库 —— 它只影响 BMI 和年龄，
+# 放在本机的 data/fit_profile.json 里，该文件已被 .gitignore 忽略。
+# 文件不存在时用中性的默认值：没有身高就不算 BMI，没有生日就不算年龄。
+_PROFILE_FILE = DATA_DIR / "fit_profile.json"
+_PROFILE_DEFAULT = {"sex": "", "height_cm": 0, "birth": ""}
 
 
-def age_on(day: dt.date | None = None) -> int:
+def _load_profile() -> dict:
+    prof = dict(_PROFILE_DEFAULT)
+    try:
+        with open(_PROFILE_FILE, encoding="utf-8") as fh:
+            data = json.load(fh)
+        for k in prof:
+            if k in data:
+                prof[k] = data[k]
+    except (FileNotFoundError, ValueError):
+        pass
+    return prof
+
+
+PROFILE = _load_profile()
+
+
+def age_on(day: dt.date | None = None) -> int | None:
+    """有生日才算年龄，没填返回 None。"""
+    if not PROFILE.get("birth"):
+        return None
     day = day or dt.date.today()
-    b = dt.date.fromisoformat(PROFILE["birth"])
+    try:
+        b = dt.date.fromisoformat(str(PROFILE["birth"]))
+    except ValueError:
+        return None
     return day.year - b.year - ((day.month, day.day) < (b.month, b.day))
 
 
-def bmi(kg: float) -> float:
-    h = PROFILE["height_cm"] / 100
+def bmi(kg: float) -> float | None:
+    """有身高才算 BMI，没填返回 None。"""
+    h_cm = PROFILE.get("height_cm") or 0
+    if not h_cm:
+        return None
+    h = h_cm / 100
     return round(kg / (h * h), 1)
 
 

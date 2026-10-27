@@ -65,9 +65,15 @@ class FitAiFrame(tk.Frame):
         db = self.app.db
         today = dt.date.today()
         since = (today - dt.timedelta(days=days)).isoformat()
+        who = []
+        if fit.PROFILE.get("height_cm"):
+            who.append(f"{fit.PROFILE['height_cm']}cm")
+        age = fit.age_on()
+        if age:
+            who.append(f"{age} 岁")
+        profile_txt = "、".join(who) if who else "未填身高年龄"
         lines = [f"统计区间：最近 {days} 天（{since} 起）",
-                 f"用户：男，{fit.PROFILE['height_cm']}cm，"
-                 f"{fit.age_on()} 岁，目标增重增肌、每天至少不比前一天轻松"]
+                 f"用户：{profile_txt}，目标增重增肌、每天至少不比前一天轻松"]
 
         # 体重：期初/期末/斜率 + 最近几个点
         ws = [(at, kg) for at, kg in db.fit_weight_all() if at[:10] >= since]
@@ -79,7 +85,8 @@ class FitAiFrame(tk.Frame):
             lines.append(
                 f"体重：{len(ws)} 次记录 / {len(daily)} 天；期初 {first}kg → "
                 f"期末 {last}kg（{last - first:+.1f}kg）；趋势 "
-                f"{fit.trend_slope(daily):+.2f} kg/周；BMI {fit.bmi(last)}；"
+                f"{fit.trend_slope(daily):+.2f} kg/周；"
+                + (f"BMI {fit.bmi(last)}；" if fit.bmi(last) else "") +
                 f"最近几天：{recent}")
         else:
             lines.append("体重：这段时间没有记录")

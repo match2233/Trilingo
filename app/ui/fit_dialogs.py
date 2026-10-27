@@ -41,9 +41,10 @@ class StrengthHistory:
         FlatButton(head, "关闭", win.destroy, bg=theme.CARD, font=theme.f(10),
                    padx=14, pady=5).pack(side="right", padx=(0, 10))
 
-        cols = ("day", "move", "sets", "last")
-        self.tree = self._tree(win, cols, ("日期", "动作", "组数", "最后一组"),
-                               (110, 260, 70, 90))
+        cols = ("at", "move", "sets", "dumbbell", "reps")
+        self.tree = self._tree(win, cols,
+                               ("时间", "动作", "组数", "哑铃", "每组次数"),
+                               (150, 220, 60, 90, 90))
         self._reload(win)
 
     def _tree(self, parent, cols, heads, widths) -> "ttk.Treeview":
@@ -69,9 +70,11 @@ class StrengthHistory:
             mv = fit.MOVE_BY_SLUG.get(r["move"], {})
             title[r["move"]] = mv.get("cn", r["move"])
         for r in rows:
+            dumbbell = f'{r["dumbbell"]} kg' if r.get("dumbbell") else "—"
+            reps = f'{r["reps"]} 次' if r.get("reps") else "—"
             self.tree.insert("", "end", values=(
-                r["day"], title.get(r["move"], r["move"]), r["n"],
-                r["last_at"][11:16]))
+                r["last_at"][:16].replace("T", " "),
+                title.get(r["move"], r["move"]), r["n"], dumbbell, reps))
         self.summary.configure(
             text=f"{len(days)} 天 · {total_sets} 组")
 

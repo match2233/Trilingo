@@ -163,9 +163,11 @@ CREATE TABLE IF NOT EXISTS fit_setting (
 -- 力量训练打卡：点一次动作按钮插一行（同一天同一动作可以有多行 = 多组）
 CREATE TABLE IF NOT EXISTS fit_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    at         TEXT NOT NULL,
+    at         TEXT NOT NULL,          -- 精确到秒
     day        TEXT NOT NULL,
-    move       TEXT NOT NULL
+    move       TEXT NOT NULL,
+    dumbbell   TEXT NOT NULL DEFAULT '',   -- 打卡时的哑铃重量(kg)
+    reps       TEXT NOT NULL DEFAULT ''    -- 打卡时的每组次数
 );
 CREATE INDEX IF NOT EXISTS idx_fit_log_day ON fit_log(day, move);
 
@@ -252,6 +254,7 @@ class Database:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.executescript(SCHEMA)
+        self._fit_migrate()   # 老库补 fit_log 的新列
         self.minna_col = "shinbunpo-1"
         self._migrate_minna_collection()
         self.conn.commit()
@@ -1604,12 +1607,24 @@ class Database:
             "INSERT OR REPLACE INTO fit_setting (k, v) VALUES (?,?)", (k, str(v)))
         self.conn.commit()
 
-    def fit_log_add(self, move: str, at: str | None = None) -> int:
+    def _fit_migrate(self) -> None:
+        """老库补上 dumbbell / reps 两列（重复执行无副作用）。"""
+        for col, ddl in (("dumbbell", "TEXT NOT NULL DEFAULT ''"),
+                         ("reps", "TEXT NOT NULL DEFAULT ''")):
+            try:
+                self.conn.execute(f"ALTER TABLE fit_log ADD COLUMN {col} {ddl}")
+            except sqlite3.OperationalError:
+                pass
+        self.conn.commit()
+
+    def fit_log_add(self, move: str, at: str | None = None,
+                    dumbbell: str = "", reps: str = "") -> int:
         """点一次动作 = 记一组。返回今天该动作的累计组数。"""
         at = at or dt.datetime.now().replace(microsecond=0).isoformat()
         day = at[:10]
         self.conn.execute(
-            "INSERT INTO fit_log (at, day, move) VALUES (?,?,?)", (at, day, move))
+            "INSERT INTO fit_log (at, day, move, dumbbell, reps) "
+            "VALUES (?,?,?,?,?)", (at, day, move, str(dumbbell), str(reps)))
         self.conn.commit()
         return self.fit_sets_day(day).get(move, 0)
 
@@ -1680,7 +1695,8 @@ class Database:
         """力量训练历史：按天+动作聚合，最近的在前。"""
         since = (dt.date.today() - dt.timedelta(days=limit_days)).isoformat()
         rows = self.conn.execute(
-            "SELECT day, move, COUNT(*) n, MIN(at) first_at, MAX(at) last_at "
+            "SELECT day, move, COUNT(*) n, MIN(at) first_at, MAX(at) last_at, "
+            "       MAX(dumbbell) dumbbell, MAX(reps) reps "
             "FROM fit_log WHERE day>=? GROUP BY day, move "
             "ORDER BY day DESC, last_at DESC", (since,)).fetchall()
         return [dict(r) for r in rows]

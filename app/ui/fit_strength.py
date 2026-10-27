@@ -17,6 +17,10 @@ from .widgets import Card, FlatButton, ScrollFrame
 ASSETS = pathlib.Path(__file__).resolve().parent.parent.parent / "assets" / "fitness"
 IMG_W, IMG_H = 300, 176
 
+# 练的部位 -> 边框颜色
+PART_COLOR = {1: theme.ERROR, 2: theme.BLUE, 3: theme.SUCCESS}
+PART_SOFT = {1: theme.ERROR_SOFT, 2: theme.BLUE_SOFT, 3: theme.SUCCESS_SOFT}
+
 
 class FitStrengthFrame(tk.Frame):
     def __init__(self, master, app):
@@ -109,29 +113,32 @@ class FitStrengthFrame(tk.Frame):
             if done else "今日还没开始")
 
     def _card(self, idx: int, mv: dict, per_row: int, done: int) -> None:
+        color = PART_COLOR.get(mv["day"], theme.BORDER)
         cell = Card(self.grid_box)
+        cell.configure(highlightbackground=color, highlightthickness=2)
         cell.grid(row=idx // per_row, column=idx % per_row,
                   padx=6, pady=6, sticky="nsew")
         self.grid_box.grid_columnconfigure(idx % per_row, weight=1, uniform="mv")
 
-        box = tk.Frame(cell, bg=theme.CARD)
+        soft = PART_SOFT.get(mv["day"], theme.SUNK)
+        box = tk.Frame(cell, bg=soft)
         box.pack(fill="both", expand=True, padx=8, pady=8)
 
         img = self._image(mv["slug"])
-        pic = tk.Label(box, bg=theme.SUNK, bd=0,
-                       image=img) if img else tk.Label(box, bg=theme.SUNK,
+        pic = tk.Label(box, bg=soft, bd=0,
+                       image=img) if img else tk.Label(box, bg=soft,
                                                        text="（无图）", height=8)
         if img:
             pic.image = img
         pic.pack(fill="x")
 
-        name = tk.Label(box, text=mv["cn"], bg=theme.CARD, fg=theme.TEXT,
+        name = tk.Label(box, text=mv["cn"], bg=soft, fg=theme.TEXT,
                         font=theme.f(12, "bold"))
         name.pack(pady=(8, 2))
 
-        tail = tk.Frame(box, bg=theme.CARD)
+        tail = tk.Frame(box, bg=soft)
         tail.pack(fill="x", pady=(0, 2))
-        tk.Label(tail, text="每组", bg=theme.CARD, fg=theme.MUTED,
+        tk.Label(tail, text="每组", bg=soft, fg=theme.MUTED,
                  font=theme.f(9)).pack(side="left")
         var = tk.StringVar(value=self.app.db.fit_setting(f"reps:{mv['slug']}",
                                                         str(mv["reps"])))
@@ -142,29 +149,32 @@ class FitStrengthFrame(tk.Frame):
         ent.pack(side="left", padx=3, ipady=1)
         ent.bind("<FocusOut>", lambda e, s=mv["slug"], v=var:
                  self.app.db.fit_set_setting(f"reps:{s}", v.get().strip()))
-        tk.Label(tail, text="次", bg=theme.CARD, fg=theme.MUTED,
+        tk.Label(tail, text="次", bg=soft, fg=theme.MUTED,
                  font=theme.f(9)).pack(side="left")
         counter = tk.Label(tail, text=f"今天 {done} 组" if done else "",
-                           bg=theme.CARD, fg=theme.SUCCESS, font=theme.f(10, "bold"))
+                           bg=soft, fg=color, font=theme.f(10, "bold"))
         counter.pack(side="right")
 
         # 整张卡片可点: 点一下 = 一组
-        def _hit(_e=None, slug=mv["slug"], lab=counter):
-            n = self.app.db.fit_log_add(slug)
+        def _hit(_e=None, slug=mv["slug"], lab=counter, reps_var=var):
+            # 打卡时把**当时的**哑铃重量和每组次数一起存下来
+            n = self.app.db.fit_log_add(
+                slug, dumbbell=self.db_var.get().strip(),
+                reps=reps_var.get().strip())
             lab.configure(text=f"今天 {n} 组")
-            self._flash(cell)
+            self._flash(cell, color)
             self._refresh_today()
 
         for w in (cell, box, pic, name, tail):
             w.configure(cursor="hand2")
             w.bind("<Button-1>", _hit)
 
-    def _flash(self, card) -> None:
+    def _flash(self, card, color) -> None:
+        """点完闪一下：先变实色，再恢复成部位色。"""
         try:
-            card.configure(highlightbackground=theme.SUCCESS,
-                           highlightthickness=2)
-            card.after(220, lambda: card.configure(
-                highlightbackground=theme.BORDER, highlightthickness=1))
+            card.configure(highlightbackground=color, highlightthickness=4)
+            card.after(200, lambda: card.configure(
+                highlightbackground=color, highlightthickness=2))
         except tk.TclError:
             pass
 

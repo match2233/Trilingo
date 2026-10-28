@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="teal">#0F766E</color>
+    <color name="teal_dark">#0A5C56</color>
+    <color name="page_bg">#F2F5F6</color>
+    <color name="nav_bar">#FFFFFF</color>
+</resources>

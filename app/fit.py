@@ -109,6 +109,50 @@ def bmi(kg: float) -> float | None:
     return round(kg / (h * h), 1)
 
 
+def parse_duration(text: str) -> int | None:
+    """把用户输入的时间解析成**秒**.
+
+    接受：
+      * `25:30` / `25：30`（分:秒）
+      * `25分30秒` / `25分` / `30秒`
+      * `25.5`（纯数字按分钟理解，兼容老习惯）
+    返回 None 表示格式不认识。
+    """
+    t = str(text or "").strip().replace("：", ":")
+    if not t:
+        return None
+    t = t.replace("分", ":").replace("秒", "").replace("'", ":").replace('"', "")
+    t = t.replace("″", "").replace("’", ":")
+    if ":" in t:
+        parts = [x.strip() for x in t.split(":")]
+        parts = [x for x in parts if x != ""]
+        if len(parts) == 2:
+            try:
+                m, sec = float(parts[0]), float(parts[1])
+            except ValueError:
+                return None
+            if m < 0 or sec < 0:
+                return None
+            return int(round(m * 60 + sec))
+        if len(parts) == 1:
+            t = parts[0]
+        else:
+            return None
+    try:
+        v = float(t)
+    except ValueError:
+        return None
+    return int(round(v * 60)) if v > 0 else None
+
+
+def fmt_duration(seconds: float | int | None) -> str:
+    """秒 -> `25'30"`；不足一分钟也带秒。"""
+    if not seconds or seconds <= 0:
+        return "—"
+    total = int(round(float(seconds)))
+    return f"{total // 60}'{total % 60:02d}\""
+
+
 def pace_text(km: float, minutes: float) -> str:
     """配速：每公里几分几秒。"""
     if km <= 0 or minutes <= 0:

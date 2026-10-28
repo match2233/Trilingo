@@ -1,0 +1,10 @@
+# 本地生成内容（含 API Key 或签名私钥），不要提交
+app/src/main/assets/config.js
+app/src/main/assets/*.png
+keystore/
+build/
+dist/
+
+# 构建产物
+*.apk
+*.jks

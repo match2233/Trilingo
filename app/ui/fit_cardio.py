@@ -12,8 +12,9 @@ from .widgets import Card, FlatButton
 ENTRY_W = 7
 
 
-def _entry(parent, var: tk.StringVar, width: int = ENTRY_W) -> tk.Entry:
-    ent = tk.Entry(parent, textvariable=var, width=width, justify="right",
+def _entry(parent, var: tk.StringVar, width: int = ENTRY_W,
+           justify: str = "right") -> tk.Entry:
+    ent = tk.Entry(parent, textvariable=var, width=width, justify=justify,
                    font=theme.f(12), bd=0, bg=theme.SUNK, fg=theme.TEXT,
                    relief="flat", highlightthickness=1,
                    highlightbackground=theme.BORDER)
@@ -64,13 +65,17 @@ class FitCardioFrame(tk.Frame):
         self.run_min = tk.StringVar()
         self.run_hr = tk.StringVar()
         for label, unit, var in (("距离", "km", self.run_km),
-                                 ("时间", "min", self.run_min),
+                                 ("时间", "分:秒", self.run_min),
                                  ("平均心率", "bpm", self.run_hr)):
             tk.Label(row, text=label, bg=theme.CARD, fg=theme.MUTED,
                      font=theme.f(10)).pack(side="left", padx=(0, 4) if label == "距离" else (18, 4))
-            _entry(row, var)
+            _entry(row, var, width=8 if label == "时间" else ENTRY_W,
+                   justify="left" if label == "时间" else "right")
             tk.Label(row, text=unit, bg=theme.CARD, fg=theme.MUTED,
                      font=theme.f(9)).pack(side="left", padx=(3, 0))
+            if label == "时间":
+                tk.Label(row, text="如 32:15", bg=theme.CARD, fg=theme.MUTED,
+                         font=theme.f(8)).pack(side="left", padx=(4, 0))
         for var in (self.run_km, self.run_min):
             var.trace_add("write", lambda *_: self._update_pace())
         FlatButton(row, "保存", lambda: self._save("run"), bg=theme.SUCCESS,
@@ -96,12 +101,16 @@ class FitCardioFrame(tk.Frame):
         self.bike_km = tk.StringVar()
         self.bike_min = tk.StringVar()
         for label, unit, var in (("距离", "km", self.bike_km),
-                                 ("时间", "min", self.bike_min)):
+                                 ("时间", "分:秒", self.bike_min)):
             tk.Label(brow, text=label, bg=theme.CARD, fg=theme.MUTED,
                      font=theme.f(10)).pack(side="left", padx=(0, 4) if label == "距离" else (18, 4))
-            _entry(brow, var)
+            _entry(brow, var, width=8 if label == "时间" else ENTRY_W,
+                   justify="left" if label == "时间" else "right")
             tk.Label(brow, text=unit, bg=theme.CARD, fg=theme.MUTED,
                      font=theme.f(9)).pack(side="left", padx=(3, 0))
+            if label == "时间":
+                tk.Label(brow, text="如 45:00", bg=theme.CARD, fg=theme.MUTED,
+                         font=theme.f(8)).pack(side="left", padx=(4, 0))
         for var in (self.bike_km, self.bike_min):
             var.trace_add("write", lambda *_: self._update_bike())
         FlatButton(brow, "保存", lambda: self._save("bike"), bg=theme.BLUE,
@@ -126,19 +135,20 @@ class FitCardioFrame(tk.Frame):
     def _update_pace(self) -> None:
         try:
             km = float(self.run_km.get() or 0)
-            minutes = float(self.run_min.get() or 0)
         except ValueError:
-            km = minutes = 0
-        self.pace.configure(text=f"配速 {fit.pace_text(km, minutes)}")
+            km = 0
+        sec = fit.parse_duration(self.run_min.get()) or 0
+        self.pace.configure(
+            text="配速 " + fit.pace_text(km, sec / 60 if sec else 0))
 
     def _update_bike(self) -> None:
         try:
             km = float(self.bike_km.get() or 0)
-            minutes = float(self.bike_min.get() or 0)
         except ValueError:
-            km = minutes = 0
-        if km > 0 and minutes > 0:
-            self.bike_speed.configure(text=f"均速 {km / (minutes / 60):.1f} km/h")
+            km = 0
+        sec = fit.parse_duration(self.bike_min.get()) or 0
+        if km > 0 and sec > 0:
+            self.bike_speed.configure(text=f"均速 {km / (sec / 3600):.1f} km/h")
         else:
             self.bike_speed.configure(text="均速 —")
 
@@ -151,13 +161,14 @@ class FitCardioFrame(tk.Frame):
             hr_var = None
         try:
             km = float(vars_[0].get().strip() or 0)
-            minutes = float(vars_[1].get().strip() or 0)
         except ValueError:
-            self.hint.configure(text="距离和时间都要是数字", fg=theme.ERROR)
+            km = 0
+        sec = fit.parse_duration(vars_[1].get())
+        if km <= 0 or not sec:
+            self.hint.configure(text="距离要填数字，时间按 分:秒 填（如 32:15）",
+                                fg=theme.ERROR)
             return
-        if km <= 0 or minutes <= 0:
-            self.hint.configure(text="距离和时间都要填", fg=theme.ERROR)
-            return
+        minutes = sec / 60
         hr = 0
         if hr_var is not None:
             try:
@@ -171,7 +182,7 @@ class FitCardioFrame(tk.Frame):
             hr_var.set("")
         label = "跑步" if kind == "run" else "骑行"
         self.hint.configure(
-            text=f"已记录 {label} {km}km / {minutes:.0f}min"
+            text=f"已记录 {label} {km}km / {fit.fmt_duration(sec)}"
                  + (f" · 配速 {fit.pace_text(km, minutes)}" if kind == "run" else ""),
             fg=theme.SUCCESS)
         self._refresh()
@@ -200,8 +211,8 @@ class FitCardioFrame(tk.Frame):
             tk.Label(row, text=f'{r["km"]:.2f} km', bg=theme.CARD,
                      fg=theme.TEXT, font=theme.f(10), width=10,
                      anchor="e").pack(side="left")
-            tk.Label(row, text=f'{r["minutes"]:.0f} min', bg=theme.CARD,
-                     fg=theme.TEXT, font=theme.f(10), width=9,
+            tk.Label(row, text=fit.fmt_duration(r["minutes"] * 60),
+                     bg=theme.CARD, fg=theme.TEXT, font=theme.f(10), width=9,
                      anchor="e").pack(side="left")
             if r["kind"] == "run":
                 tk.Label(row, text=fit.pace_text(r["km"], r["minutes"]),

@@ -103,7 +103,8 @@ class CardioHistory:
         wrap.pack(fill="both", expand=True, padx=20, pady=(6, 16))
         cols = ("at", "kind", "km", "min", "pace", "hr")
         self.tree = ttk.Treeview(wrap, columns=cols, show="headings", height=18)
-        for c, h, w in zip(cols, ("时间", "项目", "距离", "时长", "配速", "心率"),
+        for c, h, w in zip(cols, ("时间", "项目", "距离", "时长(分\\'秒\\')",
+                                  "配速", "心率"),
                            (130, 90, 90, 90, 110, 80)):
             self.tree.heading(c, text=h)
             self.tree.column(c, width=w, anchor="center")
@@ -119,7 +120,7 @@ class CardioHistory:
             self.tree.insert("", "end", values=(
                 r["at"][:16].replace("T", " "),
                 "跑步" if r["kind"] == "run" else "骑行",
-                f'{r["km"]:.2f} km', f'{r["minutes"]:.0f} min',
+                f'{r["km"]:.2f} km', fit.fmt_duration(r["minutes"] * 60),
                 fit.pace_text(r["km"], r["minutes"]) if r["kind"] == "run" else "—",
                 r["hr"] or "—"))
         self.summary.configure(text=f"跑步 {rk:.1f}km · 骑行 {bk:.1f}km")

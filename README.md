@@ -316,8 +316,11 @@ https://<用户名>.github.io/Trilingo/
 
 #### 有氧运动
 
-* **户外长跑**：距离、时间、**配速自动算**（几分几秒每公里）、平均心率
-* **户外骑行**：距离、时间，另算均速
+* **户外长跑**：距离、时间（**按 分:秒 填，如 `32:15`**，精确到秒）、
+  **配速自动算**（几分几秒每公里）、平均心率
+* **户外骑行**：距离、时间（同样是 分:秒），另算均速
+* 记录和列表里时间都显示成 `32'15"` 这种格式；旧的整分钟记录会显示成
+  `30'00"`，不影响已有数据
 * 页面下方是最近记录，【历史明细】是完整表格（时间 / 项目 / 距离 / 时长 /
   配速 / 心率）
 
@@ -361,6 +364,27 @@ https://<用户名>.github.io/Trilingo/
 * 底部统计**当月鹿次数**，即当月每天按下的数字之和
 * 【年视图】一屏 12 个格子，每个月只显示当月鹿次数之和；点某个月回到该月月视图，
   也可以翻年份
+
+## 手机端 APK（身体锻炼）
+
+除了网页版，还有一个独立的安卓 App（WebView 壳 + 同一套前端），源码在
+`android-app/`：
+
+```
+android-app/
+├─ build.ps1                 打包脚本（aapt2 + javac + d8 + apksigner）
+├─ app/src/main/assets/      前端（app.js / index.html / style.css）
+├─ app/src/main/java/...     MainActivity（WebView 壳 + 返回键）
+└─ keystore/                 签名证书（.gitignore 忽略，只存本机）
+```
+
+* 构建：需要 Android SDK（build-tools + android-35）和 JDK 17/21，
+  在 `android-app/` 下跑 `powershell -ExecutionPolicy Bypass -File build.ps1`
+* **API Key 默认不打包**：脚本只在显式加 `-EmbedKey` 时才把 `data/llm.json`
+  里的 key 写进 `assets/config.js`；否则 App 首次用 AI 时在「AI 设置」里自己填
+* **签名证书和 config.js 都不进仓库**（`android-app/.gitignore` 里已忽略），
+  所以别人 clone 下来可以构建，但签名和你手机上的 App 不一致 —— 覆盖安装会先卸载
+* APK 安装到手机后数据只在本机；这里不放 APK 文件本身，构建完自己拷过去
 
 ## 目录结构
 

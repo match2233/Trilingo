@@ -1772,6 +1772,17 @@ class Database:
             "ORDER BY g.day DESC, g.last_at DESC", (since,)).fetchall()
         return [dict(r) for r in rows]
 
+    def fit_log_since(self, since: str) -> list[dict]:
+        """时间范围内的**逐组**明细：每一条打卡都带时刻和当时的重量/次数快照。
+
+        和 fit_log_history 的按天/按动作聚合不同，这里不做任何汇总或截断，
+        供 AI 报告使用 —— 模型需要看到每一组的时间、次数和重量。
+        """
+        rows = self.conn.execute(
+            "SELECT at, day, move, dumbbell, reps FROM fit_log "
+            "WHERE day>=? ORDER BY at, id", (since,)).fetchall()
+        return [dict(r) for r in rows]
+
     def fit_log_day_totals(self, limit_days: int = 120) -> list[dict]:
         since = (dt.date.today() - dt.timedelta(days=limit_days)).isoformat()
         rows = self.conn.execute(

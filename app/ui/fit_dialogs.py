@@ -164,7 +164,14 @@ class ReportHistory:
                             font=theme.f(11), bd=0, padx=16, pady=14,
                             relief="flat", highlightthickness=1,
                             highlightbackground=theme.BORDER)
-        self.text.pack(fill="both", expand=True)
+        # 长报告要有滚动条，否则只能靠滚轮盲滚。
+        self.scroll = tk.Scrollbar(
+            right, command=self.text.yview, width=12, bg=theme.CARD,
+            troughcolor=theme.SUNK, activebackground=theme.BORDER,
+            bd=0, relief="flat", highlightthickness=0)
+        self.text.configure(yscrollcommand=self.scroll.set)
+        self.scroll.pack(side="right", fill="y")
+        self.text.pack(side="left", fill="both", expand=True)
         self.text.configure(state="disabled")
 
         self._reload()

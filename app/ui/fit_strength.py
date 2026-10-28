@@ -28,6 +28,8 @@ class FitStrengthFrame(tk.Frame):
         self.grid(row=0, column=0, sticky="nsew")
         self.app = app
         self._imgs: dict[str, object] = {}
+        self._reps_vars: dict[str, tk.StringVar] = {}   # slug -> 每组次数
+        self._dirty = False
         self._build()
 
     def _build(self) -> None:
@@ -59,8 +61,19 @@ class FitStrengthFrame(tk.Frame):
         ent.pack(side="left", padx=(12, 4), ipady=3)
         ent.bind("<FocusOut>", lambda e: self._save_dumbbell())
         ent.bind("<Return>", lambda e: self._save_dumbbell())
-        tk.Label(row, text="kg（单手，改一次长期有效）", bg=theme.CARD,
-                 fg=theme.MUTED, font=theme.f(10)).pack(side="left", padx=(4, 0))
+        tk.Label(row, text="kg", bg=theme.CARD, fg=theme.MUTED,
+                 font=theme.f(10)).pack(side="left", padx=(4, 0))
+
+        FlatButton(row, "保存", self._save_all, bg=theme.BLUE, fg="#FFFFFF",
+                   hover=theme.BLUE_DARK, active_bg=theme.BLUE_DARK,
+                   font=theme.f(11, "bold"), padx=18, pady=6
+                   ).pack(side="left", padx=(16, 8))
+        self.save_hint = tk.Label(row, text="哑铃重量和每组次数改完点保存",
+                                  bg=theme.CARD, fg=theme.MUTED,
+                                  font=theme.f(10))
+        self.save_hint.pack(side="left")
+
+        self.db_var.trace_add("write", lambda *_: self._mark_dirty())
 
         self.scroll = ScrollFrame(self)
         self.scroll.pack(fill="both", expand=True, padx=30, pady=(0, 18))
@@ -68,13 +81,67 @@ class FitStrengthFrame(tk.Frame):
         self.grid_box.pack(fill="both", expand=True)
 
     # ------------------------------------------------------------ 动作卡
+    def _mark_dirty(self) -> None:
+        self._dirty = True
+        try:
+            self.save_hint.configure(text="有未保存的修改，点【保存】生效",
+                                     fg=theme.PRIMARY)
+        except tk.TclError:
+            pass
+
     def _save_dumbbell(self) -> None:
         v = self.db_var.get().strip()
         try:
-            float(v)
+            if float(v) <= 0:
+                raise ValueError
         except ValueError:
             return
         self.app.db.fit_set_setting("dumbbell", v)
+
+    def _save_all(self) -> bool:
+        """把哑铃重量和每个动作的每组次数一次性存下来（长期有效）。
+
+        以前只有输入框失焦时才存，改完直接点卡片或者关窗口就丢了；
+        现在顶部有【保存】按钮，点卡片前也会先存一次。
+        """
+        ok = True
+        db = self.app.db
+
+        dumbbell = self.db_var.get().strip()
+        try:
+            if not dumbbell or float(dumbbell) <= 0:
+                raise ValueError
+            db.fit_set_setting("dumbbell", dumbbell)
+        except ValueError:
+            ok = False
+
+        bad = []
+        for slug, var in self._reps_vars.items():
+            raw = var.get().strip()
+            try:
+                n = int(float(raw))
+                if n <= 0:
+                    raise ValueError
+            except ValueError:
+                bad.append(slug)
+                continue
+            var.set(str(n))
+            db.fit_set_setting(f"reps:{slug}", str(n))
+
+        self._dirty = False
+        if ok and not bad:
+            self.save_hint.configure(
+                text=f"已保存（{dt.datetime.now():%H:%M}）", fg=theme.SUCCESS)
+        else:
+            msg = []
+            if not ok:
+                msg.append("哑铃重量")
+            if bad:
+                names = "、".join(fit.MOVE_BY_SLUG[b]["cn"] for b in bad[:3])
+                msg.append(f"{names}的次数")
+            self.save_hint.configure(text="这些值不对：" + "；".join(msg),
+                                     fg=theme.ERROR)
+        return ok and not bad
 
     def _image(self, slug: str):
         if slug in self._imgs:
@@ -98,6 +165,7 @@ class FitStrengthFrame(tk.Frame):
     def _render(self) -> None:
         for w in self.grid_box.winfo_children():
             w.destroy()
+        self._reps_vars.clear()
         today = dt.date.today().isoformat()
         done = self.app.db.fit_sets_day(today)
 
@@ -144,13 +212,15 @@ class FitStrengthFrame(tk.Frame):
                  font=theme.f(9)).pack(side="left")
         var = tk.StringVar(value=self.app.db.fit_setting(f"reps:{mv['slug']}",
                                                         str(mv["reps"])))
+        self._reps_vars[mv["slug"]] = var
         ent = tk.Entry(tail, textvariable=var, width=3, justify="right",
                        font=theme.f(10), bd=0, bg=theme.SUNK, fg=theme.TEXT,
                        relief="flat", highlightthickness=1,
                        highlightbackground=theme.BORDER)
         ent.pack(side="left", padx=3, ipady=1)
-        ent.bind("<FocusOut>", lambda e, s=mv["slug"], v=var:
-                 self.app.db.fit_set_setting(f"reps:{s}", v.get().strip()))
+        ent.bind("<FocusOut>", lambda e: self._save_all())
+        ent.bind("<Return>", lambda e: self._save_all())
+        var.trace_add("write", lambda *_: self._mark_dirty())
         tk.Label(tail, text="次", bg=soft, fg=theme.MUTED,
                  font=theme.f(9)).pack(side="left")
         counter = tk.Label(tail, text=f"今天 {done} 组" if done else "",
@@ -159,7 +229,8 @@ class FitStrengthFrame(tk.Frame):
 
         # 整张卡片可点: 点一下 = 一组
         def _hit(_e=None, slug=mv["slug"], lab=counter, reps_var=var):
-            # 打卡时把**当时的**哑铃重量和每组次数一起存下来
+            # 先把改过的重量/次数存下来，再按**当前值**记一组
+            self._save_all()
             n = self.app.db.fit_log_add(
                 slug, dumbbell=self.db_var.get().strip(),
                 reps=reps_var.get().strip())

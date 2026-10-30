@@ -27,58 +27,96 @@ def _dialog(master, title: str, w: int = 940, h: int = 700) -> tk.Toplevel:
 
 
 class StrengthHistory:
-    """力量训练历史：日期 / 动作 / 组数."""
+    """力量训练历史：**每一组一条**（时刻 / 动作 / 第几组 / 哑铃 / 每组次数）.
 
-    def __init__(self, master, app):
-        win = _dialog(master, "力量训练历史")
+    选中某一条可以删除 —— 等于撤销当天那一组，当天的组数会跟着减一。
+    """
+
+    def __init__(self, master, app, on_change=None):
+        win = _dialog(master, "力量训练历史", 980, 720)
         self.win = win
         self.app = app
+        self.on_change = on_change
+        self.entries: list[dict] = []
+        self._imgs = {}
+
         head = tk.Frame(win, bg=theme.BG)
         head.pack(fill="x", padx=20, pady=(16, 6))
         tk.Label(head, text="力量训练历史", bg=theme.BG, fg=theme.TEXT,
                  font=theme.f(15, "bold")).pack(side="left")
         self.summary = tk.Label(head, text="", bg=theme.BG, fg=theme.MUTED,
                                 font=theme.f(10))
-        self.summary.pack(side="right")
+        self.summary.pack(side="left", padx=10)
         FlatButton(head, "关闭", win.destroy, bg=theme.CARD, font=theme.f(10),
-                   padx=14, pady=5).pack(side="right", padx=(0, 10))
+                   padx=14, pady=5).pack(side="right")
+        FlatButton(head, "删除选中", self._delete, bg=theme.ERROR_SOFT,
+                   fg=theme.ERROR, hover=theme.ERROR_SOFT, font=theme.f(10),
+                   padx=14, pady=5, border=theme.ERROR_SOFT
+                   ).pack(side="right", padx=(0, 8))
 
-        cols = ("at", "move", "sets", "dumbbell", "reps")
+        cols = ("at", "move", "ord", "dumbbell", "reps")
         self.tree = self._tree(win, cols,
-                               ("时间", "动作", "组数", "哑铃", "每组次数"),
-                               (150, 220, 60, 90, 90))
-        self._reload(win)
+                               ("时间", "动作", "第几组", "哑铃", "每组次数"),
+                               (170, 240, 90, 100, 100))
+        self.tree.bind("<Delete>", lambda e: self._delete())
+        self._reload()
 
     def _tree(self, parent, cols, heads, widths) -> "ttk.Treeview":
         from tkinter import ttk
         wrap = tk.Frame(parent, bg=theme.BG)
         wrap.pack(fill="both", expand=True, padx=20, pady=(6, 16))
-        tree = ttk.Treeview(wrap, columns=cols, show="headings", height=18)
+        tree = ttk.Treeview(wrap, columns=cols, show="headings", height=20)
         for c, h, w in zip(cols, heads, widths):
             tree.heading(c, text=h)
-            tree.column(c, width=w, anchor="center" if w < 120 else "w")
+            tree.column(c, width=w, anchor="center" if w < 130 else "w")
         vs = ttk.Scrollbar(wrap, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=vs.set)
         vs.pack(side="right", fill="y")
         tree.pack(side="left", fill="both", expand=True)
         return tree
 
-    def _reload(self, win) -> None:
-        rows = self.app.db.fit_log_history(400)
-        days = self.app.db.fit_log_day_totals(400)
-        total_sets = sum(d["sets"] for d in days)
-        title = {}
-        for r in rows:
-            mv = fit.MOVE_BY_SLUG.get(r["move"], {})
-            title[r["move"]] = mv.get("cn", r["move"])
-        for r in rows:
-            dumbbell = f'{r["dumbbell"]} kg' if r.get("dumbbell") else "—"
-            reps = f'{r["reps"]} 次' if r.get("reps") else "—"
-            self.tree.insert("", "end", values=(
-                r["last_at"][:16].replace("T", " "),
-                title.get(r["move"], r["move"]), r["n"], dumbbell, reps))
-        self.summary.configure(
-            text=f"{len(days)} 天 · {total_sets} 组")
+    def _reload(self, select_id: int | None = None) -> None:
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        self.entries = self.app.db.fit_log_entries(800)
+        for e in self.entries:
+            mv = fit.MOVE_BY_SLUG.get(e["move"], {})
+            dumbbell = f'{e["dumbbell"]} kg' if e.get("dumbbell") else "—"
+            reps = f'{e["reps"]} 次' if e.get("reps") else "—"
+            self.tree.insert("", "end", iid=str(e["id"]), values=(
+                e["at"][:16].replace("T", " "), mv.get("cn", e["move"]),
+                f'{e["ord"]}/{e["sets"]}', dumbbell, reps))
+        total = len(self.entries)
+        days = len({e["day"] for e in self.entries})
+        self.summary.configure(text=f"{days} 天 · {total} 组")
+        if select_id is not None and self.tree.exists(str(select_id)):
+            self.tree.selection_set(str(select_id))
+            self.tree.see(str(select_id))
+
+    def _delete(self) -> None:
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showinfo("删除记录", "先在列表里选中一条记录。", parent=self.win)
+            return
+        eid = int(sel[0])
+        entry = next((e for e in self.entries if e["id"] == eid), None)
+        if entry is None:
+            return
+        mv = fit.MOVE_BY_SLUG.get(entry["move"], {})
+        label = (f'{entry["at"][:16].replace("T", " ")} · '
+                 f'{mv.get("cn", entry["move"])} 第 {entry["ord"]}/{entry["sets"]} 组')
+        if not messagebox.askyesno(
+                "删除这一组",
+                f"确定删除吗？\n\n{label}\n\n"
+                "删除后当天的组数会相应减少。", parent=self.win):
+            return
+        day, move, left = self.app.db.fit_log_delete(eid)
+        self._reload()
+        if self.on_change:
+            self.on_change()
+        # 删完给个反馈：这一动作当天还剩几组
+        name = fit.MOVE_BY_SLUG.get(move, {}).get("cn", move)
+        self.summary.configure(text=f"{self.summary.cget('text')} · 已删 {name}，当天剩 {left} 组")
 
 
 class CardioHistory:

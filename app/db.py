@@ -1749,6 +1749,33 @@ class Database:
                 "moves": len(sets)}
 
     # ------------------------------------------------ 肌薄：历史与报告
+    def fit_log_entries(self, limit: int = 500) -> list[dict]:
+        """每一组一条记录（不是按天聚合）——历史里要能看到每组的时刻和参数.
+
+        `ord` 是"这是当天该动作的第几组"，用窗口函数按时间排出来。
+        """
+        rows = self.conn.execute(
+            "SELECT id, at, day, move, dumbbell, reps, "
+            "       ROW_NUMBER() OVER (PARTITION BY day, move "
+            "                          ORDER BY at, id) ord, "
+            "       COUNT(*) OVER (PARTITION BY day, move) sets "
+            "FROM fit_log ORDER BY at DESC, id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def fit_log_delete(self, entry_id: int) -> tuple[str, str, int]:
+        """删掉某一组，返回 (day, move, 该动作当天剩余组数)."""
+        row = self.conn.execute(
+            "SELECT day, move FROM fit_log WHERE id=?", (entry_id,)).fetchone()
+        if row is None:
+            return "", "", 0
+        self.conn.execute("DELETE FROM fit_log WHERE id=?", (entry_id,))
+        self.conn.commit()
+        left = self.conn.execute(
+            "SELECT COUNT(*) n FROM fit_log WHERE day=? AND move=?",
+            (row["day"], row["move"])).fetchone()
+        return row["day"], row["move"], int(left["n"])
+
     def fit_log_history(self, limit_days: int = 120) -> list[dict]:
         """力量训练历史：按天+动作聚合，最近的在前。"""
         since = (dt.date.today() - dt.timedelta(days=limit_days)).isoformat()

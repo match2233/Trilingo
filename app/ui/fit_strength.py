@@ -259,7 +259,8 @@ class FitStrengthFrame(tk.Frame):
             if done else "今日还没开始")
 
     def _history(self) -> None:
-        self._hist = StrengthHistory(self, self.app)
+        # 关掉/删除后刷新页面上的今日组数
+        self._hist = StrengthHistory(self, self.app, on_change=self._render)
 
     def on_show(self, **_):
         self._render()

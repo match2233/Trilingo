@@ -1,16 +1,18 @@
-"""肌薄首页：体重 + 三个入口.
+"""肌薄首页：体重（上半页）+ 三个入口（下半页）.
 
 体重图：
-  * 灰色**范围带** —— 每天记录的最低~最高，一眼看出当天波动幅度
-  * 灰线 —— 每日均值
-  * 绿线 —— 时段校正后的 7 日滚动中位数（口径见 app/fit_trend.py）
-  * 散点 —— 每条记录，横轴按**真实时间**排布（不是按天等距）
+  * 灰色**范围带** —— 把每天的最高点连成一条线、最低点连成一条线，
+    中间填灰，两条边界都做平滑；
+  * 灰线 —— 每日均值；
+  * 绿线 —— 时段校正后的 7 日滚动中位数（见 app/fit_trend.py）；
+  * 散点 —— 每条记录，横轴按真实时间。
 
-悬停和记账一致：把当天那一列框起来，浮出「本日校正值 + 较前日增减」。
+悬停完全照抄记账图表：**虚线框（内部透明）** + 顶部白色浮窗。
 """
 from __future__ import annotations
 
 import datetime as dt
+import statistics
 import tkinter as tk
 
 from .. import fit, fit_trend
@@ -19,11 +21,45 @@ from .fit_dialogs import WeightHistory
 from .widgets import Card, FlatButton
 
 PERIODS = (("month", "月", 30), ("half", "半年", 182), ("all", "全部", 0))
-CHART_H = 280
+
+
+def _catmull(points: list[tuple[float, float]], samples: int = 8):
+    """Catmull-Rom 插值，用来把折线抹平滑（画阴影边界用）."""
+    if len(points) < 3:
+        return points
+    out: list[tuple[float, float]] = []
+    pts = [points[0]] + list(points) + [points[-1]]
+    for i in range(1, len(pts) - 2):
+        p0, p1, p2, p3 = pts[i - 1], pts[i], pts[i + 1], pts[i + 2]
+        for s in range(samples):
+            t = s / samples
+            t2, t3 = t * t, t * t * t
+            x = 0.5 * ((2 * p1[0]) + (-p0[0] + p2[0]) * t
+                       + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * t2
+                       + (-p0[0] + 3 * p1[0] - 3 * p2[0] + p3[0]) * t3)
+            y = 0.5 * ((2 * p1[1]) + (-p0[1] + p2[1]) * t
+                       + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * t2
+                       + (-p0[1] + 3 * p1[1] - 3 * p2[1] + p3[1]) * t3)
+            # 限制在相邻两点之间：不然样条会冲过端点，阴影带变成大波浪
+            lo_y, hi_y = sorted((p1[1], p2[1]))
+            y = min(max(y, lo_y), hi_y)
+            out.append((x, y))
+    out.append(points[-1])
+    return out
+
+
+def _median3(values: list[float]) -> list[float]:
+    """3 点中位平滑：去掉单点尖刺，又不改变整体形状."""
+    out = []
+    for i, v in enumerate(values):
+        lo = max(0, i - 1)
+        chunk = values[lo:i + 2]
+        out.append(statistics.median(chunk))
+    return out
 
 
 class WeightChart(tk.Canvas):
-    PAD_L, PAD_R, PAD_T, PAD_B = 52, 18, 16, 26
+    PAD_L, PAD_R, PAD_T, PAD_B = 52, 18, 14, 26
 
     def __init__(self, master, app, **kw):
         super().__init__(master, bg=theme.CARD, highlightthickness=0, **kw)
@@ -50,12 +86,10 @@ class WeightChart(tk.Canvas):
     def _on_motion(self, event) -> None:
         if not self._days:
             return
-        best, idx = 20.0, -1
+        best, idx = 24.0, -1
         for i, d in enumerate(self._days):
-            if d["x0"] <= event.x <= d["x1"]:
-                idx = i
-                break
-            gap = min(abs(event.x - d["x0"]), abs(event.x - d["x1"]))
+            gap = 0.0 if d["x0"] <= event.x <= d["x1"] else min(
+                abs(event.x - d["x0"]), abs(event.x - d["x1"]))
             if gap < best:
                 best, idx = gap, i
         if idx != self._hover:
@@ -95,9 +129,9 @@ class WeightChart(tk.Canvas):
         daily_raw = dict(fit_trend.daily_points(items, use_corrected=False))
         daily_adj = fit_trend.daily_points(items, use_corrected=True)
         trend = fit_trend.rolling_median(daily_adj, 7)
-
         spans = {d: (min(k for _t, k in pts), max(k for _t, k in pts))
                  for d, pts in by_day.items()}
+        days = sorted(by_day)
 
         ts_all = [ts for ts, _k, _a in items]
         t0, t1 = min(ts_all), max(ts_all)
@@ -105,20 +139,21 @@ class WeightChart(tk.Canvas):
             t0 -= dt.timedelta(minutes=30)
             t1 += dt.timedelta(minutes=30)
 
-        lo = min(v[0] for v in spans.values())
-        hi = max(v[1] for v in spans.values())
-        if trend:
-            lo = min(lo, min(v for _d, v in trend))
-            hi = max(hi, max(v for _d, v in trend))
-        pad = max(0.2, (hi - lo) * 0.1)
+        lo = min(min(v[0] for v in spans.values()), min(v for _d, v in trend))
+        hi = max(max(v[1] for v in spans.values()), max(v for _d, v in trend))
+        pad = max(0.15, (hi - lo) * 0.08)
         lo, hi = lo - pad, hi + pad
+
+        def x_of_day(d: dt.date) -> float:
+            return dt.datetime.combine(d, dt.time(12, 0)).timestamp()
 
         def px(t: float) -> float:
             return self.PAD_L + (w - self.PAD_L - self.PAD_R) * (
                 (t - t0.timestamp()) / (t1.timestamp() - t0.timestamp()))
 
         def py(v: float) -> float:
-            return self.PAD_T + (h - self.PAD_T - self.PAD_B) * (1 - (v - lo) / (hi - lo))
+            return self.PAD_T + (h - self.PAD_T - self.PAD_B) * (
+                1 - (v - lo) / (hi - lo))
 
         # 网格
         for i in range(5):
@@ -128,60 +163,61 @@ class WeightChart(tk.Canvas):
             self.create_text(self.PAD_L - 9, y, text=f"{val:.1f}", anchor="e",
                              fill="#8E94A4", font=theme.f(9))
 
-        days = sorted(by_day)
-        # 灰色范围带
+        # ---- 灰色阴影：最高点一条线、最低点一条线，中间填灰，两边都平滑
         if len(days) > 1:
-            up, down = [], []
-            for d in days:
-                cx = px(dt.datetime.combine(d, dt.time(12, 0)).timestamp())
-                up += [cx, py(spans[d][1])]
-                down = [cx, py(spans[d][0])] + down
-            self.create_polygon(*up, *down, fill="#F1F2F7", outline="")
+            # 先把"每天最高/最低"这两条序列各做一次 3 点中位平滑，
+            # 再画样条 —— 否则记录时间一偏，阴影带就锯齿乱跳
+            maxs = _median3([spans[d][1] for d in days])
+            mins = _median3([spans[d][0] for d in days])
+            mins = [min(m, x) for m, x in zip(mins, maxs)]
+            up = _catmull([(px(x_of_day(d)), py(v)) for d, v in zip(days, maxs)])
+            low = _catmull([(px(x_of_day(d)), py(v)) for d, v in zip(days, mins)])
+            poly = [c for p in up for c in p] + [c for p in reversed(low) for c in p]
+            self.create_polygon(*poly, fill="#E9ECF4", outline="")
+            self.create_line(*[c for p in up for c in p], fill="#D6DAE4", width=1.4)
+            self.create_line(*[c for p in low for c in p], fill="#D6DAE4", width=1.4)
 
-        # 横轴刻度（等距、含首尾）
+        # ---- 横轴刻度（等距、含首尾）
         n = len(days)
         k = min(6 if (t1 - t0).days <= 45 else 8, n)
         ticks = (sorted({round(i * (n - 1) / (k - 1)) for i in range(k)})
                  if k > 1 else [0])
         for i in ticks:
             d = days[i]
-            cx = px(dt.datetime.combine(d, dt.time(12, 0)).timestamp())
+            cx = px(x_of_day(d))
             self.create_line(cx, h - self.PAD_B, cx, h - self.PAD_B + 5,
                              fill="#D8DCE6")
             self.create_text(cx, h - self.PAD_B + 15, text=d.strftime("%m-%d"),
                              fill="#8E94A4", font=theme.f(9))
 
-        # 日均灰线
-        pts = []
-        for d in days:
-            if d in daily_raw:
-                pts += [px(dt.datetime.combine(d, dt.time(12, 0)).timestamp()),
-                        py(daily_raw[d])]
-        if len(pts) > 3:
-            self.create_line(*pts, fill="#B9C0CE", width=2)
+        # ---- 日均灰线
+        pts = [(px(x_of_day(d)), py(daily_raw[d])) for d in days if d in daily_raw]
+        if len(pts) > 1:
+            self.create_line(*[c for p in _catmull(pts) for c in p],
+                             fill="#B9C0CE", width=2)
 
-        # 散点（真实时间、点更大）
+        # ---- 散点
         for ts, kg, _adj in items:
             x = px(ts.timestamp())
-            self.create_oval(x - 3.0, py(kg) - 3.0, x + 3.0, py(kg) + 3.0,
+            self.create_oval(x - 2.6, py(kg) - 2.6, x + 2.6, py(kg) + 2.6,
                              fill="#AEB6C7", outline="")
 
-        # 趋势线（粗 + 浅色描边）
-        tcoords = []
-        for d, v in trend:
-            tcoords += [px(dt.datetime.combine(d, dt.time(12, 0)).timestamp()), py(v)]
-        if len(tcoords) > 3:
-            self.create_line(*tcoords, fill="#D9F2E4", width=9, smooth=True)
-            self.create_line(*tcoords, fill=theme.SUCCESS, width=4, smooth=True)
+        # ---- 趋势线
+        tpts = [(px(x_of_day(d)), py(v)) for d, v in trend]
+        if len(tpts) > 1:
+            smooth = _catmull(tpts)
+            flat = [c for p in smooth for c in p]
+            self.create_line(*flat, fill="#D9F2E4", width=9, smooth=True)
+            self.create_line(*flat, fill=theme.SUCCESS, width=3.5, smooth=True)
 
-        # 悬停区间
+        # ---- 悬停区间（按天）
         step = (w - self.PAD_L - self.PAD_R) / max(1, n)
         self._days = []
         prev = None
         for d, v in daily_adj:
             if d not in by_day:
                 continue
-            cx = px(dt.datetime.combine(d, dt.time(12, 0)).timestamp())
+            cx = px(x_of_day(d))
             self._days.append({
                 "date": d, "value": v,
                 "delta": None if prev is None else v - prev,
@@ -190,35 +226,31 @@ class WeightChart(tk.Canvas):
             prev = v
 
         if 0 <= self._hover < len(self._days):
-            self._draw_hover(h, self._days[self._hover], py)
+            self._draw_tip(h, self._days[self._hover], w)
 
-    def _draw_hover(self, h: int, day: dict, py) -> None:
+    def _draw_tip(self, h: int, day: dict, w: int) -> None:
+        """和记账图表一致：虚线框 + 顶部白色浮窗."""
         x0 = max(self.PAD_L, day["x0"])
-        x1 = min(self.winfo_width() - self.PAD_R, day["x1"])
+        x1 = min(w - self.PAD_R, day["x1"])
+        # 内部透明，只有虚线边框
         self.create_rectangle(x0, self.PAD_T, x1, h - self.PAD_B,
-                              fill="#F5F7FC", outline="#DCE0EA")
-        y = py(day["value"])
-        cx = (x0 + x1) / 2
-        self.create_line(x0, y, x1, y, fill=theme.PRIMARY, width=1, dash=(3, 3))
-        self.create_oval(cx - 5, y - 5, cx + 5, y + 5, fill="#FFFFFF",
-                         outline=theme.PRIMARY, width=2)
+                              fill="", outline=theme.BLUE, dash=(3, 2))
 
         delta = day["delta"]
         lines = [(day["date"].strftime("%m-%d"), theme.TEXT, True),
-                 (f"校正 {day['value']:.1f} kg", theme.SUCCESS, False),
-                 (("较前日 —" if delta is None else f"较前日 {delta:+.1f} kg"),
+                 (f"校正  {day['value']:.1f} kg", theme.SUCCESS, False),
+                 (("较前日  —" if delta is None else f"较前日  {delta:+.1f} kg"),
                   theme.MUTED, False)]
-        pad, row = 10, 17
-        tw = max(len(t) for t, _c, _b in lines) * 8.4 + pad * 2
-        th = len(lines) * row + pad
-        bx = min(max(cx - tw / 2, self.PAD_L),
-                 self.winfo_width() - self.PAD_R - tw)
-        by = self.PAD_T + 6
-        self.create_rectangle(bx, by, bx + tw, by + th, fill="#FFFFFF",
-                              outline="#D8DCE6")
-        for i, (text, color, bold) in enumerate(lines):
-            self.create_text(bx + pad, by + pad / 2 + 8 + i * row, anchor="w",
-                             text=text, fill=color,
+        pad, row_h = 8, 15
+        tw = max(len(t) for t, _c, _b in lines) * 7.8 + pad * 2
+        th = len(lines) * row_h + pad
+        bx = min(max((x0 + x1) / 2 - tw / 2, self.PAD_L), w - self.PAD_R - tw)
+        by = 20.0
+        self.create_rectangle(bx, by, bx + tw, by + th,
+                              fill="#FFFFFF", outline=theme.BORDER)
+        for k, (text, color, bold) in enumerate(lines):
+            self.create_text(bx + pad, by + pad / 2 + k * row_h, text=text,
+                             anchor="w", fill=color,
                              font=theme.f(9, "bold" if bold else "normal"))
 
 
@@ -227,13 +259,11 @@ class FitnessFrame(tk.Frame):
         super().__init__(master, bg=theme.BG)
         self.grid(row=0, column=0, sticky="nsew")
         self.app = app
-        self._cards: list[Card] = []
-        self._tile_side = 0
         self._build()
 
     def _build(self) -> None:
         head = tk.Frame(self, bg=theme.BG)
-        head.pack(fill="x", padx=30, pady=(16, 2))
+        head.pack(fill="x", padx=30, pady=(14, 2))
         FlatButton(head, "← 返回", lambda: self.app.show("life"), bg=theme.BG,
                    hover=theme.CARD, font=theme.f(11), padx=12, pady=7
                    ).pack(side="left")
@@ -243,14 +273,17 @@ class FitnessFrame(tk.Frame):
                                 font=theme.f(10))
         self.summary.pack(side="right")
 
+        # 上半页 = 体重，下半页 = 三个入口
         body = tk.Frame(self, bg=theme.BG)
-        body.pack(fill="both", expand=True, padx=30, pady=(6, 16))
-        self.body = body
+        body.pack(fill="both", expand=True, padx=24, pady=(4, 14))
+        body.grid_rowconfigure(0, weight=1, uniform="half")
+        body.grid_rowconfigure(1, weight=1, uniform="half")
+        body.grid_columnconfigure(0, weight=1)
 
         weight = Card(body)
-        weight.pack(fill="x", pady=(0, 8))
+        weight.grid(row=0, column=0, sticky="nsew", pady=(0, 8))
         inner = tk.Frame(weight, bg=theme.CARD)
-        inner.pack(fill="x", padx=20, pady=(12, 10))
+        inner.pack(fill="both", expand=True, padx=18, pady=(10, 8))
 
         top = tk.Frame(inner, bg=theme.CARD)
         top.pack(fill="x")
@@ -286,71 +319,51 @@ class FitnessFrame(tk.Frame):
                              font=theme.f(10))
         self.hint.pack(side="left", padx=10)
 
-        self.trend_label = tk.Label(inner, text="", bg=theme.CARD,
+        self.trend_label = tk.Label(top, text="", bg=theme.CARD,
                                     fg=theme.SUCCESS, font=theme.f(11, "bold"))
-        self.trend_label.pack(anchor="e", pady=(4, 0))
+        self.trend_label.pack(side="right")
 
-        self.chart = WeightChart(inner, self.app, height=CHART_H)
-        self.chart.pack(fill="x")
+        self.chart = WeightChart(inner, self.app)
+        self.chart.pack(fill="both", expand=True, pady=(6, 0))
 
-        grid = tk.Frame(body, bg=theme.BG)
-        grid.pack(fill="x", pady=(6, 0))
-        self.grid_box = grid
+        tiles = tk.Frame(body, bg=theme.BG)
+        tiles.grid(row=1, column=0, sticky="nsew")
         for c in range(3):
-            grid.grid_columnconfigure(c, weight=1, uniform="fit")
-        grid.grid_rowconfigure(0, weight=0)
+            tiles.grid_columnconfigure(c, weight=1, uniform="tile")
+        tiles.grid_rowconfigure(0, weight=1)
 
-        self._tile(grid, 0, "fit_strength", "力量训练", "哑铃动作打卡 · 历史明细",
+        self._tile(tiles, 0, "fit_strength", "力量训练", "哑铃动作打卡 · 历史明细",
                    "🏋", theme.BLUE, theme.BLUE_SOFT)
-        self._tile(grid, 1, "fit_cardio", "有氧运动", "跑步 · 骑行 · 配速",
+        self._tile(tiles, 1, "fit_cardio", "有氧运动", "跑步 · 骑行 · 配速",
                    "🏃", theme.SUCCESS, theme.SUCCESS_SOFT)
-        self._tile(grid, 2, "fit_ai", "AI建议", "周报 · 月报 · 半年报",
+        self._tile(tiles, 2, "fit_ai", "AI建议", "周报 · 月报 · 半年报",
                    "🤖", theme.PRIMARY, theme.PRIMARY_SOFT)
-
-        body.bind("<Configure>", lambda e: self._square_tiles())
-        for delay in (60, 200, 400):
-            self.after(delay, self._square_tiles)
 
     # ------------------------------------------------------------ 入口卡
     def _tile(self, parent, col, key, title, sub, glyph, color, soft) -> None:
         card = Card(parent)
-        card.grid(row=0, column=col, sticky="",
+        card.grid(row=0, column=col, sticky="nsew",
                   padx=(0, 8) if col == 0 else (8, 0))
-        self._cards.append(card)
 
         box = tk.Frame(card, bg=theme.CARD)
-        box.pack(fill="both", expand=True, padx=10, pady=(14, 14))
+        box.pack(fill="both", expand=True, padx=12, pady=16)
 
+        # 图标与文字都居中
         mark = tk.Label(box, text=glyph, bg=theme.CARD, fg=color,
-                        font=theme.f(46))
+                        font=theme.f(52))
         mark.pack(expand=True)
 
         btn = FlatButton(box, title, lambda k=key: self.app.show(k),
                          bg=theme.CARD, hover=soft, active_bg=soft,
-                         font=theme.f(20, "bold"), fg=color, pady=2,
-                         border=theme.CARD)
-        btn.pack(fill="x", padx=2)
+                         font=theme.f(22, "bold"), fg=color, pady=4,
+                         border=theme.CARD, anchor="center")
+        btn.pack(fill="x")
         btn.set_subtitle(sub)
         btn.configure(highlightbackground=theme.CARD)
 
         btn.bind_hover_group(card, box, mark)
         for w_ in (card, box, mark):
             w_.bind("<Button-1>", lambda e, k=key: self.app.show(k))
-
-    def _square_tiles(self) -> None:
-        """三张入口卡做成正方形：宽高都等于列宽（受可用高度限制）."""
-        gw = self.grid_box.winfo_width()
-        if gw < 90:
-            return
-        avail = self.body.winfo_height() - self.chart.winfo_height() - 210
-        side = max(150, min((gw - 16) // 3, max(avail, 260)))
-        if side == self._tile_side:
-            return
-        self._tile_side = side
-        for card in self._cards:
-            card.pack_propagate(False)      # 内容用 pack，关的是这个
-            card.grid_propagate(False)
-            card.configure(width=side, height=side)
 
     # ------------------------------------------------------------ 数据
     def _set_period(self, key: str) -> None:
@@ -375,7 +388,7 @@ class FitnessFrame(tk.Frame):
         last = trend[-1][1] if trend else daily[-1][1]
         label = {"month": "近 30 天", "half": "近半年", "all": "全部"}[self.chart.period]
         self.trend_label.configure(
-            text=f"{label}趋势 {last:.1f} kg　·　{slope:+.2f} kg/周")
+            text=f"{label}趋势 {last:.1f}kg · {slope:+.2f} kg/周")
 
     def _add_weight(self) -> None:
         try:

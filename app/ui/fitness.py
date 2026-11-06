@@ -32,6 +32,35 @@ def _median3(values: list[float]) -> list[float]:
     return out
 
 
+def _relax(values: list[float], upper: bool, radius: int = 5,
+           passes: int = 4, eps: float = 1.2) -> list[float]:
+    """把包络曲线磨平：先按需要方向池化，再多次均值，最后留一点余量.
+
+    upper=True 表示"上沿"（屏幕坐标越小越高）：
+      * 先用窗口**最小值**池化，保证不压到点；
+      * 再反复做 3 点均值，把台阶变成缓坡；
+      * 最后整体再抬 eps 像素。
+    下沿对称处理。
+    """
+    if len(values) < 3:
+        return list(values)
+    v = list(values)
+    pooled = []
+    for i in range(len(v)):
+        lo = max(0, i - radius)
+        hi = min(len(v), i + radius + 1)
+        chunk = v[lo:hi]
+        pooled.append(min(chunk) if upper else max(chunk))
+    v = pooled
+    for _ in range(passes):
+        nv = []
+        for i in range(len(v)):
+            chunk = v[max(0, i - 1):i + 2]
+            nv.append(sum(chunk) / len(chunk))
+        v = nv
+    return [x - eps if upper else x + eps for x in v]
+
+
 def _catmull(points: list[tuple[float, float]], samples: int = 8):
     """Catmull-Rom 平滑，插值点限制在相邻两点之间（防过冲）."""
     if len(points) < 3:
@@ -194,8 +223,25 @@ class WeightChart(tk.Canvas):
                     if low[j][1] < need_bot:
                         low[j] = (low[j][0], need_bot)
 
+            # 逐点撑开会在局部形成折角，这里做一次松弛：
+            # 池化 + 均值 → 缓坡；随后再夹一次"必须覆盖点"的上/下限。
+            need_top = [y for _x, y in up]
+            need_bot = [y for _x, y in low]
+            smooth_top = _relax(need_top, upper=True)
+            smooth_bot = _relax(need_bot, upper=False)
+            up = [(x, min(a, b)) for (x, _y), a, b in
+                  zip(up, smooth_top, need_top)]
+            low = [(x, max(a, b)) for (x, _y), a, b in
+                   zip(low, smooth_bot, need_bot)]
             up = [(min(max(x, left), right), min(max(y, top), bot)) for x, y in up]
             low = [(min(max(x, left), right), min(max(y, top), bot)) for x, y in low]
+            # 两端延伸到绘图区边缘，免得阴影带在最后一个点处被竖直切断
+            if up[0][0] > left:
+                up.insert(0, (left, up[0][1]))
+                low.insert(0, (left, low[0][1]))
+            if up[-1][0] < right:
+                up.append((right, up[-1][1]))
+                low.append((right, low[-1][1]))
             poly = [c for q in up for c in q] + [c for q in reversed(low) for c in q]
             self._band = (up, low)
             self.create_polygon(*poly, fill="#E9ECF4", outline="")

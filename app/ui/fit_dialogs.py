@@ -26,6 +26,95 @@ def _dialog(master, title: str, w: int = 940, h: int = 700) -> tk.Toplevel:
     return win
 
 
+class WeightHistory:
+    """体重明细：每条记录带时刻，可删除（填错时用）."""
+
+    def __init__(self, master, app, on_change=None):
+        win = _dialog(master, "体重明细", 720, 640)
+        self.win = win
+        self.app = app
+        self.on_change = on_change
+        self.entries: list[dict] = []
+
+        head = tk.Frame(win, bg=theme.BG)
+        head.pack(fill="x", padx=20, pady=(16, 6))
+        tk.Label(head, text="体重明细", bg=theme.BG, fg=theme.TEXT,
+                 font=theme.f(15, "bold")).pack(side="left")
+        self.summary = tk.Label(head, text="", bg=theme.BG, fg=theme.MUTED,
+                                font=theme.f(10))
+        self.summary.pack(side="left", padx=10)
+        FlatButton(head, "关闭", win.destroy, bg=theme.CARD, font=theme.f(10),
+                   padx=14, pady=5).pack(side="right")
+        FlatButton(head, "删除选中", self._delete, bg=theme.ERROR_SOFT,
+                   fg=theme.ERROR, hover=theme.ERROR_SOFT, font=theme.f(10),
+                   padx=14, pady=5, border=theme.ERROR_SOFT
+                   ).pack(side="right", padx=(0, 8))
+
+        from tkinter import ttk
+        wrap = tk.Frame(win, bg=theme.BG)
+        wrap.pack(fill="both", expand=True, padx=20, pady=(6, 16))
+        cols = ("at", "kg", "delta")
+        self.tree = ttk.Treeview(wrap, columns=cols, show="headings", height=18)
+        for c, t, wdt in zip(cols, ("时间", "体重", "较上一次"), (200, 120, 120)):
+            self.tree.heading(c, text=t)
+            self.tree.column(c, width=wdt, anchor="center")
+        vs = ttk.Scrollbar(wrap, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vs.set)
+        vs.pack(side="right", fill="y")
+        self.tree.pack(side="left", fill="both", expand=True)
+        self.tree.bind("<Delete>", lambda e: self._delete())
+
+        tip = tk.Label(win, text="删除后趋势图会立即重算（时段校正也会跟着更新）",
+                       bg=theme.BG, fg=theme.MUTED, font=theme.f(9))
+        tip.pack(anchor="w", padx=22, pady=(0, 12))
+        self._reload()
+
+    def _reload(self) -> None:
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        self.entries = self.app.db.fit_weight_entries(800)
+        chrono = sorted(self.entries, key=lambda e: e["at"])
+        prev: dict[int, float | None] = {}
+        last = None
+        for e in chrono:
+            prev[e["id"]] = last
+            last = e["kg"]
+        for e in self.entries:
+            before = prev.get(e["id"])
+            if before is None:
+                delta = "—"
+            else:
+                d = e["kg"] - before
+                delta = f"{d:+.1f} kg"
+            self.tree.insert("", "end", iid=str(e["id"]), values=(
+                e["at"][:16].replace("T", " "), f'{e["kg"]:.1f} kg', delta))
+        if self.entries:
+            lo = min(e["kg"] for e in self.entries)
+            hi = max(e["kg"] for e in self.entries)
+            self.summary.configure(
+                text=f"{len(self.entries)} 条 · {lo:.1f}~{hi:.1f} kg")
+        else:
+            self.summary.configure(text="还没有记录")
+
+    def _delete(self) -> None:
+        sel = self.tree.selection()
+        if not sel:
+            messagebox.showinfo("删除记录", "先在列表里选中一条。", parent=self.win)
+            return
+        wid = int(sel[0])
+        entry = next((e for e in self.entries if e["id"] == wid), None)
+        if not entry:
+            return
+        label = f'{entry["at"][:16].replace("T", " ")} · {entry["kg"]:.1f} kg'
+        if not messagebox.askyesno("删除这条体重记录",
+                                   f"确定删除吗？\n\n{label}", parent=self.win):
+            return
+        self.app.db.fit_weight_delete(wid)
+        self._reload()
+        if self.on_change:
+            self.on_change()
+
+
 class StrengthHistory:
     """力量训练历史：**每一组一条**（时刻 / 动作 / 第几组 / 哑铃 / 每组次数）.
 

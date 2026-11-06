@@ -1616,6 +1616,13 @@ class Database:
             "SELECT at, kg FROM fit_weight ORDER BY at").fetchall()
         return [(r["at"], float(r["kg"])) for r in rows]
 
+    def fit_weight_entries(self, limit: int = 500) -> list[dict]:
+        """体重明细：每条带 id（用于删除）。"""
+        rows = self.conn.execute(
+            "SELECT id, at, kg FROM fit_weight ORDER BY at DESC LIMIT ?",
+            (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
     def fit_weight_delete(self, wid: int) -> None:
         self.conn.execute("DELETE FROM fit_weight WHERE id=?", (wid,))
         self.conn.commit()

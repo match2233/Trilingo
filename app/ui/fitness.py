@@ -135,6 +135,11 @@ class WeightChart(tk.Canvas):
         if (t1 - t0).total_seconds() < 3600:
             t0 -= dt.timedelta(minutes=30)
             t1 += dt.timedelta(minutes=30)
+        # 两端各留半天，否则第一天的点和日期会被纵轴压住
+        span = t1 - t0
+        edge = max(dt.timedelta(hours=8), span * 0.04)
+        t0 -= edge
+        t1 += edge
 
         lo = min(min(v[0] for v in spans.values()), min(v for _d, v in trend))
         hi = max(max(v[1] for v in spans.values()), max(v for _d, v in trend))
@@ -154,6 +159,12 @@ class WeightChart(tk.Canvas):
 
         top, bot = self.PAD_T, h - self.PAD_B
         left, right = self.PAD_L, w - self.PAD_R
+        # 供自检使用：投影参数 + 包络曲线
+        self._proj = {"t0": t0.timestamp(), "t1": t1.timestamp(),
+                      "lo": lo, "hi": hi, "left": left, "right": right,
+                      "top": top, "bot": bot}
+        self._band = None
+        self._items = items
 
         # ---- ① 灰色包络带（先画，坐标轴随后压在上面）
         if len(days) > 1:
@@ -162,11 +173,31 @@ class WeightChart(tk.Canvas):
             up_vals = [max(a, b) for a, b in zip(_median3(raw_max), raw_max)]
             low_vals = [min(a, b) for a, b in zip(_median3(raw_min), raw_min)]
             xs = [min(max(px(x_of(d)), left), right) for d in days]
-            up = [(min(max(x, left), right), min(max(y, top), bot))
-                  for x, y in _catmull(list(zip(xs, [py(v) for v in up_vals])))]
-            low = [(min(max(x, left), right), min(max(y, top), bot))
-                   for x, y in _catmull(list(zip(xs, [py(v) for v in low_vals])))]
+            up = _catmull(list(zip(xs, [py(v) for v in up_vals])))
+            low = _catmull(list(zip(xs, [py(v) for v in low_vals])))
+
+            # 每个真实数据点都必须在带子里：找到最近的采样点，把上下沿各撑开，
+            # 并按距离做三角形衰减，避免出现单点尖刺。再额外留 0.1kg 余量。
+            margin = 0.1 / max(1e-6, (hi - lo)) * (bot - top)
+            for ts, kg, _adj in items:
+                xp, yp = px(ts.timestamp()), py(kg)
+                i = min(range(len(up)), key=lambda k: abs(up[k][0] - xp))
+                for off in range(-4, 5):
+                    j = i + off
+                    if not (0 <= j < len(up)):
+                        continue
+                    fall = max(0.0, 1 - abs(off) / 5.0)
+                    need_top = yp - margin * fall
+                    need_bot = yp + margin * fall
+                    if up[j][1] > need_top:
+                        up[j] = (up[j][0], need_top)
+                    if low[j][1] < need_bot:
+                        low[j] = (low[j][0], need_bot)
+
+            up = [(min(max(x, left), right), min(max(y, top), bot)) for x, y in up]
+            low = [(min(max(x, left), right), min(max(y, top), bot)) for x, y in low]
             poly = [c for q in up for c in q] + [c for q in reversed(low) for c in q]
+            self._band = (up, low)
             self.create_polygon(*poly, fill="#E9ECF4", outline="")
             self.create_line(*[c for q in up for c in q], fill="#D6DAE4", width=1.4)
             self.create_line(*[c for q in low for c in q], fill="#D6DAE4", width=1.4)

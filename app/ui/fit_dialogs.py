@@ -50,9 +50,14 @@ class WeightHistory:
                    padx=14, pady=5, border=theme.ERROR_SOFT
                    ).pack(side="right", padx=(0, 8))
 
+        self.hour_label = tk.Label(win, text="", bg=theme.BG, fg=theme.MUTED,
+                                   font=theme.f(9), justify="left", anchor="w",
+                                   wraplength=660)
+        self.hour_label.pack(fill="x", padx=22, pady=(2, 0))
+
         from tkinter import ttk
         wrap = tk.Frame(win, bg=theme.BG)
-        wrap.pack(fill="both", expand=True, padx=20, pady=(6, 16))
+        wrap.pack(fill="both", expand=True, padx=20, pady=(6, 8))
         cols = ("at", "kg", "delta")
         self.tree = ttk.Treeview(wrap, columns=cols, show="headings", height=18)
         for c, t, wdt in zip(cols, ("时间", "体重", "较上一次"), (200, 120, 120)):
@@ -95,6 +100,25 @@ class WeightHistory:
                 text=f"{len(self.entries)} 条 · {lo:.1f}~{hi:.1f} kg")
         else:
             self.summary.configure(text="还没有记录")
+        self._refresh_hours()
+
+    def _refresh_hours(self) -> None:
+        """把当前学到的"几点该校正多少"摆出来，样本数一起显示，方便判断可信度."""
+        try:
+            offsets = self.app.db.fit_hour_offsets()
+            counts: dict[int, int] = {}
+            for r in self.app.db.fit_hour_samples():
+                counts[int(r["hour"])] = counts.get(int(r["hour"]), 0) + int(r["n"])
+        except Exception:      # noqa: BLE001
+            offsets, counts = {}, {}
+        if not offsets:
+            self.hour_label.configure(
+                text="时段校正：样本还不够（同一天至少要有 2 条记录才会参与学习）")
+            return
+        parts = [f"{h:02d}点 {v:+.2f}（{counts.get(h, 0)}条）"
+                 for h, v in sorted(offsets.items())]
+        self.hour_label.configure(
+            text="时段校正（越近的样本权重越高，会持续更新）：" + "　".join(parts))
 
     def _delete(self) -> None:
         sel = self.tree.selection()

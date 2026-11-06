@@ -44,6 +44,44 @@ def hour_offsets(records: list[tuple[str, float]]) -> dict[int, float]:
     return {h: statistics.median(v) for h, v in usable.items()}
 
 
+def offsets_from_samples(samples: list[dict], today=None,
+                         half_life_days: float = 60.0,
+                         prior: float = 3.0,
+                         limit: float = 1.5) -> dict[int, float]:
+    """从"每天每小时的偏差样本"里学习当前标准.
+
+    * **时间衰减**：样本权重 = 0.5 ** (距今天数 / 半衰期)，默认半衰期 60 天，
+      所以最近两个月的数据主导，半年前的旧习惯会淡出 —— 换季、作息变化能跟上。
+    * **收缩**：offset = Σ(w·sum) / (Σ(w·n) + prior)，prior=3 相当于"先验 3 条
+      样本、偏差为 0"，样本少的小时会自动往 0 拉，不会两条数据就定标准。
+    * **限幅**：结果夹在 ±limit（默认 1.5kg）内。
+
+    返回 {hour: offset_kg}；某个小时有效样本不足 2 条时不返回它。
+    """
+    if not samples:
+        return {}
+    today = today or dt.date.today()
+    weighted: dict[int, list[float]] = {}      # hour -> [w*n, w*sum]
+    for r in samples:
+        try:
+            day = dt.date.fromisoformat(str(r["day"]))
+        except ValueError:
+            continue
+        age = max(0, (today - day).days)
+        w = 0.5 ** (age / max(1.0, half_life_days))
+        bucket = weighted.setdefault(int(r["hour"]), [0.0, 0.0])
+        bucket[0] += w * float(r["n"])
+        bucket[1] += w * float(r["sum"])
+
+    out: dict[int, float] = {}
+    for hour, (wn, wsum) in weighted.items():
+        if wn < 2:            # 有效样本太少，先不校正这个点
+            continue
+        offset = wsum / (wn + prior)
+        out[hour] = round(max(-limit, min(limit, offset)), 3)
+    return out
+
+
 def corrected(records: list[tuple[str, float]],
               offsets: dict[int, float] | None = None
               ) -> list[tuple[dt.datetime, float, float]]:

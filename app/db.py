@@ -186,6 +186,15 @@ CREATE TABLE IF NOT EXISTS fit_cardio (
 );
 CREATE INDEX IF NOT EXISTS idx_fit_cardio_day ON fit_cardio(day, kind);
 
+-- 时段校正的"学习样本"：每天每个整点相对当天中位数的偏差（增量更新）
+CREATE TABLE IF NOT EXISTS fit_hour_sample (
+    day        TEXT NOT NULL,
+    hour       INTEGER NOT NULL,
+    n          INTEGER NOT NULL,      -- 当天该时刻的记录条数
+    sum        REAL NOT NULL,         -- 这些记录相对当天中位数的偏差之和
+    PRIMARY KEY (day, hour)
+);
+
 -- AI 报告历史：每次点周报/月报/半年报存一份，界面上按日期列出来
 CREATE TABLE IF NOT EXISTS fit_report (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1610,11 +1619,51 @@ class Database:
         self.conn.execute(
             "INSERT INTO fit_weight (at, day, kg) VALUES (?,?,?)", (at, day, kg))
         self.conn.commit()
+        self._fit_refresh_hour_day(day)
 
     def fit_weight_all(self) -> list[tuple[str, float]]:
         rows = self.conn.execute(
             "SELECT at, kg FROM fit_weight ORDER BY at").fetchall()
         return [(r["at"], float(r["kg"])) for r in rows]
+
+    def _fit_refresh_hour_day(self, day: str) -> None:
+        """重算某一天的时段样本（增删一条记录后调用）."""
+        rows = self.conn.execute(
+            "SELECT at, kg FROM fit_weight WHERE day=?", (day,)).fetchall()
+        self.conn.execute("DELETE FROM fit_hour_sample WHERE day=?", (day,))
+        if len(rows) >= 2:
+            med = sorted(r["kg"] for r in rows)[len(rows) // 2]
+            if len(rows) % 2 == 0:
+                lo, hi = sorted(r["kg"] for r in rows)[len(rows) // 2 - 1],                     sorted(r["kg"] for r in rows)[len(rows) // 2]
+                med = (lo + hi) / 2
+            agg: dict[int, list] = {}
+            for r in rows:
+                hour = dt.datetime.fromisoformat(r["at"]).hour
+                bucket = agg.setdefault(hour, [0, 0.0])
+                bucket[0] += 1
+                bucket[1] += float(r["kg"]) - med
+            for hour, (n, total) in agg.items():
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO fit_hour_sample (day,hour,n,sum)"
+                    " VALUES (?,?,?,?)", (day, hour, n, total))
+        self.conn.commit()
+
+    def _fit_rebuild_hour_samples(self) -> None:
+        """整表重建（首次启用或数据被外部改动时用）."""
+        self.conn.execute("DELETE FROM fit_hour_sample")
+        days = [r["day"] for r in self.conn.execute(
+            "SELECT DISTINCT day FROM fit_weight").fetchall()]
+        for day in days:
+            self._fit_refresh_hour_day(day)
+
+    def fit_hour_samples(self) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT day, hour, n, sum FROM fit_hour_sample").fetchall()]
+
+    def fit_hour_offsets(self) -> dict[int, float]:
+        """按时间衰减聚合样本，得到当前的"标准"（几点该加/减多少）."""
+        from . import fit_trend
+        return fit_trend.offsets_from_samples(self.fit_hour_samples())
 
     def fit_weight_entries(self, limit: int = 500) -> list[dict]:
         """体重明细：每条带 id（用于删除）。"""
@@ -1624,8 +1673,12 @@ class Database:
         return [dict(r) for r in rows]
 
     def fit_weight_delete(self, wid: int) -> None:
+        row = self.conn.execute(
+            "SELECT day FROM fit_weight WHERE id=?", (wid,)).fetchone()
         self.conn.execute("DELETE FROM fit_weight WHERE id=?", (wid,))
         self.conn.commit()
+        if row:
+            self._fit_refresh_hour_day(row["day"])
 
     def fit_weight_last(self) -> tuple[str, float] | None:
         r = self.conn.execute(
@@ -1652,6 +1705,12 @@ class Database:
                 pass
         self.conn.commit()
         self._fit_backfill_snapshot()
+        empty = self.conn.execute(
+            "SELECT COUNT(*) c FROM fit_hour_sample").fetchone()["c"]
+        has_w = self.conn.execute(
+            "SELECT COUNT(*) c FROM fit_weight").fetchone()["c"]
+        if not empty and has_w:
+            self._fit_rebuild_hour_samples()
 
     def _fit_backfill_snapshot(self) -> None:
         """把加列之前的旧记录补上哑铃重量 / 每组次数。

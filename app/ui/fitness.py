@@ -108,6 +108,14 @@ class WeightChart(tk.Canvas):
                   if dt.datetime.fromisoformat(at).date() >= cut]
         return window if len(window) >= 2 else records
 
+    def _offsets(self) -> dict[int, float]:
+        """当前时段标准：优先用持续学习的样本，其次退回按记录现算."""
+        try:
+            off = self.app.db.fit_hour_offsets()
+        except Exception:      # noqa: BLE001
+            off = {}
+        return off or fit_trend.hour_offsets(self.app.db.fit_weight_all())
+
     # ------------------------------------------------------------ 交互
     def _on_motion(self, event) -> None:
         if not self._days:
@@ -141,7 +149,7 @@ class WeightChart(tk.Canvas):
             self._days = []
             return
 
-        offsets = fit_trend.hour_offsets(self.app.db.fit_weight_all())
+        offsets = self._offsets()
         items = fit_trend.corrected(window, offsets)
         by_day: dict[dt.date, list[tuple[dt.datetime, float]]] = {}
         for ts, kg, _adj in items:
@@ -466,7 +474,7 @@ class FitnessFrame(tk.Frame):
         if len(window) < 2:
             self.trend_label.configure(text="")
             return
-        offsets = fit_trend.hour_offsets(self.app.db.fit_weight_all())
+        offsets = self.chart._offsets()
         items = fit_trend.corrected(window, offsets)
         daily = fit_trend.daily_points(items, use_corrected=True)
         trend = fit_trend.rolling_median(daily, 7)

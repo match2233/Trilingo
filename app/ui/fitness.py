@@ -1,12 +1,12 @@
 """肌薄首页：体重 + 三个入口.
 
-体重图三层（口径见 app/fit_trend.py）：
-  * 散点 —— 每一条记录
+体重图：
+  * 灰色**范围带** —— 每天记录的最低~最高，一眼看出当天波动幅度
   * 灰线 —— 每日均值
-  * 绿线 —— 时段校正后的 7 日滚动中位数
+  * 绿线 —— 时段校正后的 7 日滚动中位数（口径见 app/fit_trend.py）
+  * 散点 —— 每条记录，横轴按**真实时间**排布（不是按天等距）
 
-顶部可切「月 / 半年 / 全部」。鼠标悬停以**天**为单位吸附，
-浮出「本日校正值」和「较前日增减」。
+悬停和记账一致：把当天那一列框起来，浮出「本日校正值 + 较前日增减」。
 """
 from __future__ import annotations
 
@@ -19,40 +19,21 @@ from .fit_dialogs import WeightHistory
 from .widgets import Card, FlatButton
 
 PERIODS = (("month", "月", 30), ("half", "半年", 182), ("all", "全部", 0))
+CHART_H = 280
 
 
 class WeightChart(tk.Canvas):
-    """体重散点 + 日均线 + 稳健趋势线，带按天吸附的悬停提示。"""
-
-    PAD_L, PAD_R, PAD_T, PAD_B = 58, 24, 26, 30
+    PAD_L, PAD_R, PAD_T, PAD_B = 52, 18, 16, 26
 
     def __init__(self, master, app, **kw):
         super().__init__(master, bg=theme.CARD, highlightthickness=0, **kw)
         self.app = app
         self.period = "month"
-        self._days: list[dict] = []      # 每天一条：date, x, corrected, delta
+        self._days: list[dict] = []
         self._hover = -1
         self.bind("<Configure>", lambda e: self.redraw())
         self.bind("<Motion>", self._on_motion)
         self.bind("<Leave>", self._on_leave)
-
-    # ------------------------------------------------------------ 交互
-    def _on_motion(self, event) -> None:
-        if not self._days:
-            return
-        best, idx = 16.0, -1
-        for i, d in enumerate(self._days):
-            gap = abs(d["x"] - event.x)
-            if gap < best:
-                best, idx = gap, i
-        if idx != self._hover:
-            self._hover = idx
-            self.redraw()
-
-    def _on_leave(self, _e=None) -> None:
-        if self._hover != -1:
-            self._hover = -1
-            self.redraw()
 
     # ------------------------------------------------------------ 数据
     def _window(self) -> list[tuple[str, float]]:
@@ -65,11 +46,32 @@ class WeightChart(tk.Canvas):
                   if dt.datetime.fromisoformat(at).date() >= cut]
         return window if len(window) >= 2 else records
 
+    # ------------------------------------------------------------ 交互
+    def _on_motion(self, event) -> None:
+        if not self._days:
+            return
+        best, idx = 20.0, -1
+        for i, d in enumerate(self._days):
+            if d["x0"] <= event.x <= d["x1"]:
+                idx = i
+                break
+            gap = min(abs(event.x - d["x0"]), abs(event.x - d["x1"]))
+            if gap < best:
+                best, idx = gap, i
+        if idx != self._hover:
+            self._hover = idx
+            self.redraw()
+
+    def _on_leave(self, _e=None) -> None:
+        if self._hover != -1:
+            self._hover = -1
+            self.redraw()
+
     # ------------------------------------------------------------ 绘制
     def redraw(self) -> None:
         self.delete("all")
         w, h = self.winfo_width(), self.winfo_height()
-        if w < 120 or h < 100:
+        if w < 140 or h < 90:
             return
 
         window = self._window()
@@ -79,122 +81,139 @@ class WeightChart(tk.Canvas):
             self._days = []
             return
 
-        # 时段校正在**全部历史**上估计，窗口只影响画什么
         offsets = fit_trend.hour_offsets(self.app.db.fit_weight_all())
-        items = [it for it in fit_trend.corrected(window, offsets)]
-        daily_raw = dict(fit_trend.daily_points(items, use_corrected=False))
-        daily_adj = fit_trend.daily_points(items, use_corrected=True)
-        trend = fit_trend.rolling_median(daily_adj, 7)
-
-        if len(items) < 2:
+        items = fit_trend.corrected(window, offsets)
+        by_day: dict[dt.date, list[tuple[dt.datetime, float]]] = {}
+        for ts, kg, _adj in items:
+            by_day.setdefault(ts.date(), []).append((ts, kg))
+        if len(by_day) < 2:
             self.create_text(w // 2, h // 2, text="记录还太少，画不出趋势",
                              fill=theme.MUTED, font=theme.f(11))
             self._days = []
             return
 
-        dates = sorted({ts.date() for ts, _k, _a in items})
-        d0, d1 = dates[0], dates[-1]
-        span_days = max(1, (d1 - d0).days)
-        vals = [a for _t, _k, a in items] + [k for _t, k, _a in items] \
-            + [v for _d, v in trend]
-        lo, hi = min(vals), max(vals)
-        pad = max(0.35, (hi - lo) * 0.18)
+        daily_raw = dict(fit_trend.daily_points(items, use_corrected=False))
+        daily_adj = fit_trend.daily_points(items, use_corrected=True)
+        trend = fit_trend.rolling_median(daily_adj, 7)
+
+        spans = {d: (min(k for _t, k in pts), max(k for _t, k in pts))
+                 for d, pts in by_day.items()}
+
+        ts_all = [ts for ts, _k, _a in items]
+        t0, t1 = min(ts_all), max(ts_all)
+        if (t1 - t0).total_seconds() < 3600:
+            t0 -= dt.timedelta(minutes=30)
+            t1 += dt.timedelta(minutes=30)
+
+        lo = min(v[0] for v in spans.values())
+        hi = max(v[1] for v in spans.values())
+        if trend:
+            lo = min(lo, min(v for _d, v in trend))
+            hi = max(hi, max(v for _d, v in trend))
+        pad = max(0.2, (hi - lo) * 0.1)
         lo, hi = lo - pad, hi + pad
 
         def px(t: float) -> float:
-            return self.PAD_L + (w - self.PAD_L - self.PAD_R) * ((t - d0.toordinal())
-                                                                / span_days)
-
-        def px_day(d: dt.date) -> float:
-            return px(d.toordinal())
+            return self.PAD_L + (w - self.PAD_L - self.PAD_R) * (
+                (t - t0.timestamp()) / (t1.timestamp() - t0.timestamp()))
 
         def py(v: float) -> float:
             return self.PAD_T + (h - self.PAD_T - self.PAD_B) * (1 - (v - lo) / (hi - lo))
 
-        # ---- 背景：细网格 + 纵轴
+        # 网格
         for i in range(5):
             val = lo + (hi - lo) * i / 4
             y = py(val)
-            self.create_line(self.PAD_L, y, w - self.PAD_R, y,
-                             fill="#EEF0F6")
-            self.create_text(self.PAD_L - 10, y, text=f"{val:.1f}", anchor="e",
-                             fill="#9AA0AE", font=theme.f(9))
+            self.create_line(self.PAD_L, y, w - self.PAD_R, y, fill="#E9EBF2")
+            self.create_text(self.PAD_L - 9, y, text=f"{val:.1f}", anchor="e",
+                             fill="#8E94A4", font=theme.f(9))
 
-        # ---- 横轴：等距取刻度，**首尾都包含**，这样不会出现两个标签挤在一起
-        n = len(dates)
-        k = 6 if span_days <= 45 else (8 if span_days <= 200 else 9)
-        k = min(k, n)
-        if k <= 1:
-            ticks = [0]
-        else:
-            ticks = sorted({round(i * (n - 1) / (k - 1)) for i in range(k)})
+        days = sorted(by_day)
+        # 灰色范围带
+        if len(days) > 1:
+            up, down = [], []
+            for d in days:
+                cx = px(dt.datetime.combine(d, dt.time(12, 0)).timestamp())
+                up += [cx, py(spans[d][1])]
+                down = [cx, py(spans[d][0])] + down
+            self.create_polygon(*up, *down, fill="#F1F2F7", outline="")
+
+        # 横轴刻度（等距、含首尾）
+        n = len(days)
+        k = min(6 if (t1 - t0).days <= 45 else 8, n)
+        ticks = (sorted({round(i * (n - 1) / (k - 1)) for i in range(k)})
+                 if k > 1 else [0])
         for i in ticks:
-            d = dates[i]
-            self.create_line(px_day(d), h - self.PAD_B,
-                             px_day(d), h - self.PAD_B + 4, fill="#D8DCE6")
-            self.create_text(px_day(d), h - self.PAD_B + 15,
-                             text=d.strftime("%m-%d"), fill="#9AA0AE",
-                             font=theme.f(9))
+            d = days[i]
+            cx = px(dt.datetime.combine(d, dt.time(12, 0)).timestamp())
+            self.create_line(cx, h - self.PAD_B, cx, h - self.PAD_B + 5,
+                             fill="#D8DCE6")
+            self.create_text(cx, h - self.PAD_B + 15, text=d.strftime("%m-%d"),
+                             fill="#8E94A4", font=theme.f(9))
 
-        # ---- 日均灰线
-        if len(daily_raw) > 1:
-            pts = []
-            for d in dates:
-                if d in daily_raw:
-                    pts += [px_day(d), py(daily_raw[d])]
-            if len(pts) > 3:
-                self.create_line(*pts, fill="#D5D9E3", width=1.1)
+        # 日均灰线
+        pts = []
+        for d in days:
+            if d in daily_raw:
+                pts += [px(dt.datetime.combine(d, dt.time(12, 0)).timestamp()),
+                        py(daily_raw[d])]
+        if len(pts) > 3:
+            self.create_line(*pts, fill="#B9C0CE", width=2)
 
-        # ---- 散点（按天轻微左右抖动，避免同一时刻叠成一坨）
-        by_day: dict[dt.date, list[tuple[dt.datetime, float, float]]] = {}
-        for ts, kg, adj in items:
-            by_day.setdefault(ts.date(), []).append((ts, kg, adj))
-        for d, points in by_day.items():
-            for ts, kg, _adj in points:
-                x = px_day(d) + (ts.hour - 12) * 0.55
-                self.create_oval(x - 1.9, py(kg) - 1.9, x + 1.9, py(kg) + 1.9,
-                                 fill="#C2C8D6", outline="")
+        # 散点（真实时间、点更大）
+        for ts, kg, _adj in items:
+            x = px(ts.timestamp())
+            self.create_oval(x - 3.0, py(kg) - 3.0, x + 3.0, py(kg) + 3.0,
+                             fill="#AEB6C7", outline="")
 
-        # ---- 趋势线：先画一条浅色粗线打底，再叠主线，看起来更柔和
+        # 趋势线（粗 + 浅色描边）
         tcoords = []
         for d, v in trend:
-            tcoords += [px_day(d), py(v)]
+            tcoords += [px(dt.datetime.combine(d, dt.time(12, 0)).timestamp()), py(v)]
         if len(tcoords) > 3:
-            self.create_line(*tcoords, fill="#CFEFDC", width=6, smooth=True)
-            self.create_line(*tcoords, fill=theme.SUCCESS, width=2.4, smooth=True)
+            self.create_line(*tcoords, fill="#D9F2E4", width=9, smooth=True)
+            self.create_line(*tcoords, fill=theme.SUCCESS, width=4, smooth=True)
 
-        # ---- 悬停用的每日数据
-        deltas: dict[dt.date, float | None] = {}
+        # 悬停区间
+        step = (w - self.PAD_L - self.PAD_R) / max(1, n)
+        self._days = []
         prev = None
         for d, v in daily_adj:
-            deltas[d] = None if prev is None else v - prev
+            if d not in by_day:
+                continue
+            cx = px(dt.datetime.combine(d, dt.time(12, 0)).timestamp())
+            self._days.append({
+                "date": d, "value": v,
+                "delta": None if prev is None else v - prev,
+                "x0": cx - step / 2, "x1": cx + step / 2,
+            })
             prev = v
-        self._days = [{"date": d, "x": px_day(d), "value": v,
-                       "delta": deltas.get(d)} for d, v in daily_adj]
 
         if 0 <= self._hover < len(self._days):
-            self._draw_tip(w, h, self._days[self._hover], lo, hi, py)
+            self._draw_hover(h, self._days[self._hover], py)
 
-    def _draw_tip(self, w: int, h: int, day: dict, lo: float, hi: float, py) -> None:
-        x = day["x"]
+    def _draw_hover(self, h: int, day: dict, py) -> None:
+        x0 = max(self.PAD_L, day["x0"])
+        x1 = min(self.winfo_width() - self.PAD_R, day["x1"])
+        self.create_rectangle(x0, self.PAD_T, x1, h - self.PAD_B,
+                              fill="#F5F7FC", outline="#DCE0EA")
         y = py(day["value"])
-        self.create_line(x, self.PAD_T, x, h - self.PAD_B,
-                         fill="#E8622C", dash=(3, 4))
-        self.create_oval(x - 5, y - 5, x + 5, y + 5, fill="#FFFFFF",
+        cx = (x0 + x1) / 2
+        self.create_line(x0, y, x1, y, fill=theme.PRIMARY, width=1, dash=(3, 3))
+        self.create_oval(cx - 5, y - 5, cx + 5, y + 5, fill="#FFFFFF",
                          outline=theme.PRIMARY, width=2)
 
         delta = day["delta"]
         lines = [(day["date"].strftime("%m-%d"), theme.TEXT, True),
                  (f"校正 {day['value']:.1f} kg", theme.SUCCESS, False),
-                 (("较前日 —" if delta is None else
-                   f"较前日 {delta:+.1f} kg"), theme.MUTED, False)]
+                 (("较前日 —" if delta is None else f"较前日 {delta:+.1f} kg"),
+                  theme.MUTED, False)]
         pad, row = 10, 17
         tw = max(len(t) for t, _c, _b in lines) * 8.4 + pad * 2
         th = len(lines) * row + pad
-        bx = min(max(x - tw / 2, self.PAD_L), w - self.PAD_R - tw)
-        by = y - th - 16
-        if by < self.PAD_T:
-            by = y + 16
+        bx = min(max(cx - tw / 2, self.PAD_L),
+                 self.winfo_width() - self.PAD_R - tw)
+        by = self.PAD_T + 6
         self.create_rectangle(bx, by, bx + tw, by + th, fill="#FFFFFF",
                               outline="#D8DCE6")
         for i, (text, color, bold) in enumerate(lines):
@@ -208,11 +227,13 @@ class FitnessFrame(tk.Frame):
         super().__init__(master, bg=theme.BG)
         self.grid(row=0, column=0, sticky="nsew")
         self.app = app
+        self._cards: list[Card] = []
+        self._tile_side = 0
         self._build()
 
     def _build(self) -> None:
         head = tk.Frame(self, bg=theme.BG)
-        head.pack(fill="x", padx=30, pady=(18, 4))
+        head.pack(fill="x", padx=30, pady=(16, 2))
         FlatButton(head, "← 返回", lambda: self.app.show("life"), bg=theme.BG,
                    hover=theme.CARD, font=theme.f(11), padx=12, pady=7
                    ).pack(side="left")
@@ -223,12 +244,13 @@ class FitnessFrame(tk.Frame):
         self.summary.pack(side="right")
 
         body = tk.Frame(self, bg=theme.BG)
-        body.pack(fill="both", expand=True, padx=30, pady=(8, 18))
+        body.pack(fill="both", expand=True, padx=30, pady=(6, 16))
+        self.body = body
 
         weight = Card(body)
-        weight.pack(fill="x", pady=(0, 10))
+        weight.pack(fill="x", pady=(0, 8))
         inner = tk.Frame(weight, bg=theme.CARD)
-        inner.pack(fill="x", padx=22, pady=(14, 12))
+        inner.pack(fill="x", padx=20, pady=(12, 10))
 
         top = tk.Frame(inner, bg=theme.CARD)
         top.pack(fill="x")
@@ -250,7 +272,6 @@ class FitnessFrame(tk.Frame):
         FlatButton(top, "详细数据", self._open_detail, bg=theme.CARD,
                    font=theme.f(11), padx=14, pady=7).pack(side="left")
 
-        # 周期切换：月 / 半年 / 全部
         seg = tk.Frame(top, bg=theme.CARD)
         seg.pack(side="left", padx=(16, 0))
         self.period_btns: dict[str, FlatButton] = {}
@@ -265,20 +286,19 @@ class FitnessFrame(tk.Frame):
                              font=theme.f(10))
         self.hint.pack(side="left", padx=10)
 
-        # 趋势摘要放在图表上方，不画在画布里，避免和曲线文字重叠
         self.trend_label = tk.Label(inner, text="", bg=theme.CARD,
                                     fg=theme.SUCCESS, font=theme.f(11, "bold"))
-        self.trend_label.pack(anchor="e", pady=(6, 0))
+        self.trend_label.pack(anchor="e", pady=(4, 0))
 
-        self.chart = WeightChart(inner, self.app, height=430)
-        self.chart.pack(fill="x", pady=(2, 0))
-        self._set_period("month")
+        self.chart = WeightChart(inner, self.app, height=CHART_H)
+        self.chart.pack(fill="x")
 
         grid = tk.Frame(body, bg=theme.BG)
-        grid.pack(fill="both", expand=True, pady=(6, 0))
+        grid.pack(fill="x", pady=(6, 0))
+        self.grid_box = grid
         for c in range(3):
             grid.grid_columnconfigure(c, weight=1, uniform="fit")
-        grid.grid_rowconfigure(0, weight=1)
+        grid.grid_rowconfigure(0, weight=0)
 
         self._tile(grid, 0, "fit_strength", "力量训练", "哑铃动作打卡 · 历史明细",
                    "🏋", theme.BLUE, theme.BLUE_SOFT)
@@ -287,22 +307,27 @@ class FitnessFrame(tk.Frame):
         self._tile(grid, 2, "fit_ai", "AI建议", "周报 · 月报 · 半年报",
                    "🤖", theme.PRIMARY, theme.PRIMARY_SOFT)
 
+        body.bind("<Configure>", lambda e: self._square_tiles())
+        for delay in (60, 200, 400):
+            self.after(delay, self._square_tiles)
+
     # ------------------------------------------------------------ 入口卡
     def _tile(self, parent, col, key, title, sub, glyph, color, soft) -> None:
         card = Card(parent)
-        card.grid(row=0, column=col, sticky="nsew",
+        card.grid(row=0, column=col, sticky="",
                   padx=(0, 8) if col == 0 else (8, 0))
-        box = tk.Frame(card, bg=theme.CARD)
-        box.pack(fill="both", expand=True, padx=6, pady=6)
+        self._cards.append(card)
 
-        # 图标水平垂直都居中
+        box = tk.Frame(card, bg=theme.CARD)
+        box.pack(fill="both", expand=True, padx=10, pady=(14, 14))
+
         mark = tk.Label(box, text=glyph, bg=theme.CARD, fg=color,
-                        font=theme.f(40))
+                        font=theme.f(46))
         mark.pack(expand=True)
 
         btn = FlatButton(box, title, lambda k=key: self.app.show(k),
                          bg=theme.CARD, hover=soft, active_bg=soft,
-                         font=theme.f(19, "bold"), fg=color, pady=2,
+                         font=theme.f(20, "bold"), fg=color, pady=2,
                          border=theme.CARD)
         btn.pack(fill="x", padx=2)
         btn.set_subtitle(sub)
@@ -311,6 +336,21 @@ class FitnessFrame(tk.Frame):
         btn.bind_hover_group(card, box, mark)
         for w_ in (card, box, mark):
             w_.bind("<Button-1>", lambda e, k=key: self.app.show(k))
+
+    def _square_tiles(self) -> None:
+        """三张入口卡做成正方形：宽高都等于列宽（受可用高度限制）."""
+        gw = self.grid_box.winfo_width()
+        if gw < 90:
+            return
+        avail = self.body.winfo_height() - self.chart.winfo_height() - 210
+        side = max(150, min((gw - 16) // 3, max(avail, 260)))
+        if side == self._tile_side:
+            return
+        self._tile_side = side
+        for card in self._cards:
+            card.pack_propagate(False)      # 内容用 pack，关的是这个
+            card.grid_propagate(False)
+            card.configure(width=side, height=side)
 
     # ------------------------------------------------------------ 数据
     def _set_period(self, key: str) -> None:
@@ -327,8 +367,7 @@ class FitnessFrame(tk.Frame):
         if len(window) < 2:
             self.trend_label.configure(text="")
             return
-        records = self.app.db.fit_weight_all()
-        offsets = fit_trend.hour_offsets(records)
+        offsets = fit_trend.hour_offsets(self.app.db.fit_weight_all())
         items = fit_trend.corrected(window, offsets)
         daily = fit_trend.daily_points(items, use_corrected=True)
         trend = fit_trend.rolling_median(daily, 7)

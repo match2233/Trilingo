@@ -503,6 +503,7 @@ class FitnessFrame(tk.Frame):
         self._hist = WeightHistory(self, self.app, on_change=self._refresh)
 
     def _refresh(self) -> None:
+        # 体重一变，整套校正标准与绿线都重算（含历史数据）
         self.chart.redraw()
         self._update_trend_label()
         s = self.app.db.fit_summary()

@@ -26,6 +26,8 @@ MOVES: list[dict] = [
      "reps": 12, "day": 1, "core": False},
     {"slug": "triceps-ext", "cn": "哑铃颈后臂屈伸", "en": "Triceps Extension",
      "reps": 12, "day": 1, "core": False},
+    {"slug": "push-up", "cn": "俯卧撑", "en": "Push-up",
+     "reps": 12, "day": 1, "core": False},
     {"slug": "rdl", "cn": "哑铃罗马尼亚硬拉", "en": "Romanian Deadlift",
      "reps": 12, "day": 2, "core": True},
     {"slug": "bent-row", "cn": "哑铃俯身划船", "en": "Bent-Over Row",
@@ -56,7 +58,7 @@ DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 DAY_PLAN: list[tuple[int, str, str, list[str]]] = [
     (1, "推日", "胸 / 肩 / 三头",
      ["incline-press", "bench-press", "shoulder-press",
-      "lateral-raise", "triceps-ext"]),
+      "lateral-raise", "triceps-ext", "push-up"]),
     (2, "拉日", "背 / 二头",
      ["rdl", "bent-row", "single-row",
       "reverse-fly", "face-pull", "bicep-curl"]),

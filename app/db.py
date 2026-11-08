@@ -1619,7 +1619,8 @@ class Database:
         self.conn.execute(
             "INSERT INTO fit_weight (at, day, kg) VALUES (?,?,?)", (at, day, kg))
         self.conn.commit()
-        self._fit_refresh_hour_day(day)
+        # 每次录入都整体重学一次：老数据的时段样本也按最新数据重算
+        self._fit_rebuild_hour_samples()
 
     def fit_weight_all(self) -> list[tuple[str, float]]:
         rows = self.conn.execute(
@@ -1678,7 +1679,7 @@ class Database:
         self.conn.execute("DELETE FROM fit_weight WHERE id=?", (wid,))
         self.conn.commit()
         if row:
-            self._fit_refresh_hour_day(row["day"])
+            self._fit_rebuild_hour_samples()
 
     def fit_weight_last(self) -> tuple[str, float] | None:
         r = self.conn.execute(

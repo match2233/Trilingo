@@ -221,7 +221,7 @@ class FitStrengthFrame(tk.Frame):
         ent.bind("<FocusOut>", lambda e: self._save_all())
         ent.bind("<Return>", lambda e: self._save_all())
         var.trace_add("write", lambda *_: self._mark_dirty())
-        tk.Label(tail, text="次", bg=soft, fg=theme.MUTED,
+        tk.Label(tail, text=mv.get("unit", "次"), bg=soft, fg=theme.MUTED,
                  font=theme.f(9)).pack(side="left")
         counter = tk.Label(tail, text=f"今天 {done} 组" if done else "",
                            bg=soft, fg=color, font=theme.f(10, "bold"))

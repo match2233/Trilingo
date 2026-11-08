@@ -169,7 +169,7 @@ class StrengthHistory:
 
         cols = ("at", "move", "ord", "dumbbell", "reps")
         self.tree = self._tree(win, cols,
-                               ("时间", "动作", "第几组", "哑铃", "每组次数"),
+                               ("时间", "动作", "第几组", "哑铃", "每组"),
                                (170, 240, 90, 100, 100))
         self.tree.bind("<Delete>", lambda e: self._delete())
         self._reload()
@@ -195,7 +195,8 @@ class StrengthHistory:
         for e in self.entries:
             mv = fit.MOVE_BY_SLUG.get(e["move"], {})
             dumbbell = f'{e["dumbbell"]} kg' if e.get("dumbbell") else "—"
-            reps = f'{e["reps"]} 次' if e.get("reps") else "—"
+            unit = fit.MOVE_BY_SLUG.get(e["move"], {}).get("unit", "次")
+            reps = f'{e["reps"]} {unit}' if e.get("reps") else "—"
             self.tree.insert("", "end", iid=str(e["id"]), values=(
                 e["at"][:16].replace("T", " "), mv.get("cn", e["move"]),
                 f'{e["ord"]}/{e["sets"]}', dumbbell, reps))

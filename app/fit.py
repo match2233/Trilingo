@@ -28,6 +28,8 @@ MOVES: list[dict] = [
      "reps": 12, "day": 1, "core": False},
     {"slug": "push-up", "cn": "俯卧撑", "en": "Push-up",
      "reps": 12, "day": 1, "core": False},
+    {"slug": "fly", "cn": "平板哑铃飞鸟", "en": "Dumbbell Fly",
+     "reps": 12, "day": 1, "core": False},
     {"slug": "rdl", "cn": "哑铃罗马尼亚硬拉", "en": "Romanian Deadlift",
      "reps": 12, "day": 2, "core": True},
     {"slug": "bent-row", "cn": "哑铃俯身划船", "en": "Bent-Over Row",
@@ -46,6 +48,11 @@ MOVES: list[dict] = [
      "reps": 12, "day": 3, "core": False},
     {"slug": "hip-thrust", "cn": "哑铃臀桥", "en": "Hip Thrust",
      "reps": 12, "day": 3, "core": False},
+    # 平板类按"秒"记，默认每组 30 秒
+    {"slug": "plank", "cn": "平板支撑", "en": "Plank",
+     "reps": 30, "unit": "秒", "day": 3, "core": False},
+    {"slug": "side-plank", "cn": "侧平板支撑", "en": "Side Plank",
+     "reps": 30, "unit": "秒", "day": 3, "core": False},
 ]
 
 MOVE_BY_SLUG = {m["slug"]: m for m in MOVES}
@@ -64,7 +71,7 @@ DAY_PLAN: list[tuple[int, str, str, list[str]]] = [
       "reverse-fly", "face-pull", "bicep-curl"]),
     (3, "腿日", "腿 / 臀 / 腹",
      ["goblet-squat", "shoulder-press", "face-pull",
-      "lateral-raise", "crunch", "hip-thrust"]),
+      "lateral-raise", "crunch", "hip-thrust", "plank", "side-plank"]),
 ]
 
 # 个人资料（身高/生日）不写进代码仓库 —— 它只影响 BMI 和年龄，

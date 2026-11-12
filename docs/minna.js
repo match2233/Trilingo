@@ -62,14 +62,35 @@ function allProgress() {
 
 function prog(n) { return allProgress()[n] || null; }
 
+/** 本地时间戳 (与电脑端 _now_ms 对齐), 精确到毫秒:
+ *  同一秒内先"完成"再"重做"也能分出先后。 */
+function nowLocal() {
+  const d = new Date();
+  const p = (n, w = 2) => String(n).padStart(w, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+    + `T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+    + `.${p(d.getMilliseconds(), 3)}`;
+}
+
 function patchProg(n, patch) {
   const all = allProgress();
   all[n] = Object.assign({
     status: 'idle', section: 0, idx: 0, seconds: 0,
     score: 0, total: 0, results: {}, updated_at: '',
-  }, all[n] || {}, patch, { updated_at: new Date().toISOString().slice(0, 19) });
+  }, all[n] || {}, patch, { updated_at: nowLocal() });
   onChange();
   return all[n];
+}
+
+/** 重置一课: 不能直接删记录, 否则云端旧进度会在下次同步时被带回来。
+ *  写一条 status='idle' 的墓碑, 更新时间最新, 合并时会淘汰旧记录。 */
+function resetProgress(n) {
+  const all = allProgress();
+  all[n] = {
+    status: 'idle', section: 0, idx: 0, seconds: 0, score: 0, total: 0,
+    results: {}, updated_at: nowLocal(),
+  };
+  onChange();
 }
 
 export function progressMap() { return allProgress(); }
@@ -291,7 +312,8 @@ export function renderList() {
     let score = '—';
     let scoreCls = '';
     let time = '—';
-    if (p) {
+    // status='idle' 是重置墓碑, 按"未开始"显示
+    if (p && p.status !== 'idle') {
       const got = Object.keys(p.results || {}).length;
       ratio = Math.min(1, got / total);
       pctTxt = `${got}/${total}`;
@@ -748,8 +770,7 @@ function renderPaper(justFinished) {
   $('paperFav').onclick = () => { renderFav(); hooks.showView('minnaFav'); };
   $('paperRedo').onclick = () => {
     if (!confirm('清空这一课的作答记录，重新开始？')) return;
-    delete allProgress()[M.lesson];
-    onChange();
+    resetProgress(M.lesson);
     openLesson(M.lesson, false);
   };
   window.scrollTo(0, 0);

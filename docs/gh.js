@@ -135,10 +135,14 @@ export async function syncNow() {
   let merged = merge(local, remote, 'remote');
   merged.updated = new Date().toISOString().slice(0, 19);
 
-  const changed = JSON.stringify({ ...local, updated: '' }) !== JSON.stringify({ ...merged, updated: '' });
+  // 写回条件要跟云端比, 不是跟本机比: 本机重置后 merged 可能正好等于
+  // local, 但云端仍是旧数据, 不写回的话重置就传不出去。
+  const localChanged = JSON.stringify({ ...local, updated: '' }) !== JSON.stringify({ ...merged, updated: '' });
+  const pushed = JSON.stringify({ ...remote, updated: '' }) !== JSON.stringify({ ...merged, updated: '' }) || !sha;
+  const changed = localChanged || pushed;
 
   let newSha = sha;
-  if (changed || !sha) {
+  if (pushed) {
     try {
       newSha = await push(merged, sha, cfg);
     } catch (e) {
@@ -152,7 +156,7 @@ export async function syncNow() {
 
   saveLocalState(merged);
   markPending(false);
-  return { state: merged, changed, sha: (newSha || '').slice(0, 8) };
+  return { state: merged, changed, pushed, sha: (newSha || '').slice(0, 8) };
 }
 
 /** 只拉取并合并到本地, **不上传**.

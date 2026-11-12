@@ -91,8 +91,9 @@ function mergeDeer(a, b) {
 }
 
 function mergeMinna(a, b) {
-  const rank = (r) => [String(r.updated_at || ''), Number(r.score || 0),
-    Number(r.seconds || 0)].join('|');
+  // 时间戳相同时让 idle 墓碑胜出 (与 Python 端 _merge_minna 保持一致)
+  const rank = (r) => [String(r.updated_at || ''), r.status === 'idle' ? 1 : 0,
+    Number(r.score || 0), Number(r.seconds || 0)].join('|');
   const out = {};
   for (const src of [a || {}, b || {}]) {
     for (const [k, rec] of Object.entries(src)) {

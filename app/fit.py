@@ -42,6 +42,8 @@ MOVES: list[dict] = [
      "reps": 12, "day": 2, "core": False},
     {"slug": "bicep-curl", "cn": "哑铃二头弯举", "en": "Bicep Curl",
      "reps": 12, "day": 2, "core": False},
+    {"slug": "hammer-curl", "cn": "哑铃锤式弯举", "en": "Hammer Curl",
+     "reps": 12, "day": 2, "core": False},
     {"slug": "goblet-squat", "cn": "哑铃高脚杯深蹲", "en": "Goblet Squat",
      "reps": 12, "day": 3, "core": True},
     {"slug": "crunch", "cn": "哑铃卷腹", "en": "Crunch",
@@ -53,6 +55,12 @@ MOVES: list[dict] = [
      "reps": 30, "unit": "秒", "day": 3, "core": False},
     {"slug": "side-plank", "cn": "侧平板支撑", "en": "Side Plank",
      "reps": 30, "unit": "秒", "day": 3, "core": False},
+    {"slug": "lunge", "cn": "哑铃箭步蹲", "en": "Lunge",
+     "reps": 12, "day": 3, "core": False},
+    {"slug": "calf-raise", "cn": "哑铃提踵", "en": "Calf Raise",
+     "reps": 12, "day": 3, "core": False},
+    {"slug": "russian-twist", "cn": "哑铃俄罗斯转体", "en": "Russian Twist",
+     "reps": 12, "day": 3, "core": False},
 ]
 
 MOVE_BY_SLUG = {m["slug"]: m for m in MOVES}
@@ -71,7 +79,8 @@ DAY_PLAN: list[tuple[int, str, str, list[str]]] = [
       "reverse-fly", "face-pull", "bicep-curl"]),
     (3, "腿日", "腿 / 臀 / 腹",
      ["goblet-squat", "shoulder-press", "face-pull",
-      "lateral-raise", "crunch", "hip-thrust", "plank", "side-plank"]),
+      "lateral-raise", "crunch", "hip-thrust", "plank", "side-plank",
+      "lunge", "calf-raise", "russian-twist"]),
 ]
 
 # 个人资料（身高/生日）不写进代码仓库 —— 它只影响 BMI 和年龄，

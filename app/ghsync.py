@@ -323,11 +323,15 @@ def sync(db, device: str = "pc", message: str = "") -> dict:
     merged = sc.merge(local, remote, prefer="local")
     merged["updated"] = _now()
 
-    # 合并没有变化就不必写回, 省一次提交
-    changed = _differs(local, merged)
+    # 合并没有变化就不必写回, 省一次提交。
+    # 注意写回条件要跟**云端**比, 而不是跟本机比: 本机重置/删除后 merged
+    # 可能正好等于 local, 但云端还是旧数据; 不写回的话, 重置就永远传不出去。
+    local_changed = _differs(local, merged)
+    pushed = _differs(remote, merged) or not sha
+    changed = local_changed or pushed
 
     new_sha = sha
-    if changed or not sha:
+    if pushed:
         try:
             new_sha = put(merged, sha, cfg, message or f"sync from {device}")
         except SyncError as exc:
@@ -345,6 +349,7 @@ def sync(db, device: str = "pc", message: str = "") -> dict:
     apply_state_to_db(db, merged)
     return {
         "changed": changed,
+        "pushed": pushed,
         "events": len(merged["events"]),
         "mistakes": len(der_count(merged)),
         "days": len(sc.derive(merged)["days"]),

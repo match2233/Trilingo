@@ -125,11 +125,18 @@ def _merge_deer(a: dict, b: dict) -> dict:
 
 
 def _merge_minna(a: dict, b: dict) -> dict:
-    """每课取 updated_at 较新的那份进度 (含该课的作答结果)."""
+    """每课取 updated_at 较新的那份进度 (含该课的作答结果).
+
+    重置不会删除记录, 而是写一条 status='idle'、updated_at 最新的墓碑;
+    因此这里按时间取新记录时, 会自然把云端的旧进度淘汰掉。
+    """
 
     def rank(k):
-        return (str(k.get("updated_at", "")), int(k.get("score") or 0),
-                int(k.get("seconds") or 0))
+        # 时间戳相同时让 idle 墓碑胜出: 重置必须比旧进度更"硬"，
+        # 否则同一毫秒内完成+重置时, 分数高的旧记录会把重置吞掉。
+        return (str(k.get("updated_at", "")),
+                1 if k.get("status") == "idle" else 0,
+                int(k.get("score") or 0), int(k.get("seconds") or 0))
 
     out: dict[str, dict] = {}
     for src in (a or {}, b or {}):

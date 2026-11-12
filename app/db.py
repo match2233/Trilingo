@@ -207,7 +207,9 @@ CREATE INDEX IF NOT EXISTS idx_fit_report_at ON fit_report(at);
 
 -- ---------------------------------------------------------------- 新标日测试
 -- 题库本身是 data/minna_tests.json (桌面与 PWA 共用同一份), 这里只存进度。
--- 进度**不参与跨设备同步**: 每台设备各记各的, 避免再动那套脆弱的事件同步。
+-- 进度参与跨设备同步。重置时**不能删行**: 同步是"每课取较新的那份",
+-- 本机删掉后云端旧记录就成了唯一一份, 下次同步又会被原样带回来。
+-- 所以重置会留一条 status='idle' 的墓碑记录, 用最新的 updated_at 淘汰旧进度。
 CREATE TABLE IF NOT EXISTS minna_progress (
     collection  TEXT NOT NULL DEFAULT 'shinbunpo-1',
     lesson      INTEGER NOT NULL,
@@ -251,6 +253,15 @@ def today() -> str:
 
 def _now() -> str:
     return dt.datetime.now().isoformat(timespec="seconds")
+
+
+def _now_ms() -> str:
+    """测试进度专用: 毫秒时间戳 (与手机端 nowLocal() 格式一致).
+
+    同一秒内先"完成"再"重做"时, 秒级时间戳会打平; 合并规则在时间相同时
+    会偏向分数高的旧记录, 重做就丢了。毫秒级可以保证后一次操作严格更新。
+    """
+    return dt.datetime.now().isoformat(timespec="milliseconds")
 
 
 def add_days(day: str, n: int) -> str:
@@ -1295,7 +1306,7 @@ class Database:
 
     def minna_start(self, lesson: int, total: int) -> None:
         """开始一课: 计时起点, 清掉该课上一次作答结果."""
-        now = _now()
+        now = _now_ms()
         col = self._col()
         self.conn.execute(
             "DELETE FROM minna_result WHERE collection=? AND lesson=?", (col, lesson))
@@ -1318,7 +1329,7 @@ class Database:
         self.conn.execute(
             "UPDATE minna_progress SET section=?, idx=?, seconds=?, score=?,"
             " updated_at=? WHERE collection=? AND lesson=?",
-            (section, idx, seconds, score, _now(), self._col(), lesson),
+            (section, idx, seconds, score, _now_ms(), self._col(), lesson),
         )
         self.conn.commit()
 
@@ -1331,7 +1342,7 @@ class Database:
         self.conn.commit()
 
     def minna_finish(self, lesson: int, seconds: int, score: int, total: int) -> None:
-        now = _now()
+        now = _now_ms()
         self.conn.execute(
             "UPDATE minna_progress SET status='done', seconds=?, score=?, total=?,"
             " finished_at=?, updated_at=? WHERE collection=? AND lesson=?",
@@ -1347,12 +1358,30 @@ class Database:
         }
 
     def minna_reset(self, lesson: int) -> None:
-        """重做这一课: 清空进度与结果 (收藏与笔记保留)."""
+        """重做这一课: 清空进度与结果 (收藏与笔记保留).
+
+        这里**不能**直接 DELETE 进度行。同步合并规则是"同试卷集+课取
+        updated_at 较新的那份", 本机删掉后, 云端那条旧进度就成了唯一一份,
+        下一次同步会被原样应用回来 —— 表现就是"重置后又被云端覆盖"。
+
+        改为留一条 status='idle' 的墓碑记录, 更新时间取当前时刻:
+        合并时它比云端旧进度新, 会淘汰旧记录; 另一台设备收到后也会把
+        该课清空。真正重新开始这一课时, minna_start() 会把墓碑覆盖成 doing。
+        """
         col = self._col()
+        now = _now_ms()
         self.conn.execute(
             "DELETE FROM minna_result WHERE collection=? AND lesson=?", (col, lesson))
         self.conn.execute(
-            "DELETE FROM minna_progress WHERE collection=? AND lesson=?", (col, lesson))
+            "INSERT INTO minna_progress"
+            " (collection,lesson,status,section,idx,seconds,score,total,"
+            "  started_at,finished_at,updated_at)"
+            " VALUES (?,?,'idle',0,0,0,0,0,NULL,NULL,?)"
+            " ON CONFLICT(collection,lesson) DO UPDATE SET"
+            " status='idle', section=0, idx=0, seconds=0, score=0, total=0,"
+            " started_at=NULL, finished_at=NULL, updated_at=excluded.updated_at",
+            (col, lesson, now),
+        )
         self.conn.commit()
 
     # ------------------------------------------------------------ 收藏
@@ -1532,6 +1561,9 @@ class Database:
 
         外部键仍是 lesson（手机端和老的 state.json 都按这个读），但同时带上
         `collection`，避免多试卷集时把不同卷子的同一课串在一起。
+
+        status='idle' 的记录是重置墓碑, 也要导出 —— 它负责把"这一课已清空"
+        同步到另一台设备, 并压过云端那条更旧的 done/doing 记录。
         """
         out: dict[str, dict] = {}
         for r in self.conn.execute("SELECT * FROM minna_progress"):
@@ -1558,6 +1590,9 @@ class Database:
 
         主键是 (collection, lesson)，所以合并也必须按这两列走 —— 之前写成
         ON CONFLICT(lesson) 会直接报 "does not match any PRIMARY KEY"。
+
+        收到 status='idle' 的较新记录时, 会连该课的 minna_result 一起清空,
+        这样另一端执行的重置也能在本机生效。
         """
         added = 0
         for key, rec in (minna or {}).items():
@@ -1574,14 +1609,17 @@ class Database:
                 continue
             col = raw or DEFAULT_COLLECTION
             cur = self.conn.execute(
-                "SELECT updated_at FROM minna_progress "
+                "SELECT updated_at, status FROM minna_progress "
                 "WHERE collection=? AND lesson=?", (col, les)).fetchone()
             cur_at = str(cur["updated_at"] or "") if cur else ""
             new_at = str(rec.get("updated_at") or "")
             if cur_at and new_at and new_at < cur_at:
                 continue
             if cur_at and new_at and new_at == cur_at:
-                continue                      # 同一时刻, 以本机为准
+                # 同一时刻以本机为准; 但重置墓碑必须能压过旧进度,
+                # 否则同一毫秒内"完成 -> 重置"会被旧记录吞掉。
+                if not (rec.get("status") == "idle" and (cur["status"] or "") != "idle"):
+                    continue
             self.conn.execute(
                 "INSERT INTO minna_progress"
                 " (collection,lesson,status,section,idx,seconds,score,total,"
@@ -1595,7 +1633,7 @@ class Database:
                 (col, les, rec.get("status", "idle"), int(rec.get("section") or 0),
                  int(rec.get("idx") or 0), int(rec.get("seconds") or 0),
                  int(rec.get("score") or 0), int(rec.get("total") or 0),
-                 new_at or _now()),
+                 new_at or _now_ms()),
             )
             self.conn.execute(
                 "DELETE FROM minna_result WHERE collection=? AND lesson=?",

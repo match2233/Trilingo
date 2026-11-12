@@ -96,7 +96,7 @@ class MinnaListFrame(tk.Frame):
         spent = tk.Label(row, text="—", bg=theme.CARD, fg=theme.MUTED,
                          font=theme.f(11), width=10)
         spent.pack(side="right")
-        # 重置这一套的进度 (先问一句, 免得误点)
+        # 重置这一课的进度 (先问一句, 免得误点)
         reset = tk.Label(row, text="重置", bg=theme.SUNK, fg=theme.MUTED,
                          font=theme.f(10), cursor="hand2", padx=8, pady=2,
                          highlightthickness=1,

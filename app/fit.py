@@ -44,6 +44,10 @@ MOVES: list[dict] = [
      "reps": 12, "day": 2, "core": False},
     {"slug": "hammer-curl", "cn": "哑铃锤式弯举", "en": "Hammer Curl",
      "reps": 12, "day": 2, "core": False},
+    {"slug": "reverse-wrist-curl", "cn": "哑铃反向腕弯举", "en": "Reverse Wrist Curl",
+     "reps": 12, "day": 2, "core": False},
+    {"slug": "pronation-supination", "cn": "哑铃旋前/旋后", "en": "Pronation / Supination",
+     "reps": 12, "day": 2, "core": False},
     {"slug": "goblet-squat", "cn": "哑铃高脚杯深蹲", "en": "Goblet Squat",
      "reps": 12, "day": 3, "core": True},
     {"slug": "crunch", "cn": "哑铃卷腹", "en": "Crunch",
@@ -67,20 +71,15 @@ MOVE_BY_SLUG = {m["slug"]: m for m in MOVES}
 
 DATA_DIR = pathlib.Path(__file__).resolve().parent.parent / "data"
 
-# 训练计划的编排：三天、共 17 个动作条目。
-# 肩推 / 面拉 / 侧平举在「推日/拉日」和「腿日」都会出现，按原计划重复列，
-# 但共用同一个 slug —— 计数和历史上仍然算同一个动作。
+# 训练计划的编排：三天，直接由 MOVES 的 day 字段派生，
+# 避免动作表改了这里却忘了同步（以前就是这里留着早已不存在的 slug）。
 DAY_PLAN: list[tuple[int, str, str, list[str]]] = [
-    (1, "推日", "胸 / 肩 / 三头",
-     ["incline-press", "bench-press", "shoulder-press",
-      "lateral-raise", "triceps-ext", "push-up"]),
-    (2, "拉日", "背 / 二头",
-     ["rdl", "bent-row", "single-row",
-      "reverse-fly", "face-pull", "bicep-curl"]),
-    (3, "腿日", "腿 / 臀 / 腹",
-     ["goblet-squat", "shoulder-press", "face-pull",
-      "lateral-raise", "crunch", "hip-thrust", "plank", "side-plank",
-      "lunge", "calf-raise", "russian-twist"]),
+    (day, name, part, [m["slug"] for m in MOVES if m["day"] == day])
+    for day, name, part in (
+        (1, "推日", "胸 / 肩 / 三头"),
+        (2, "拉日", "背 / 二头"),
+        (3, "腿日", "腿 / 臀 / 腹"),
+    )
 ]
 
 # 个人资料（身高/生日）不写进代码仓库 —— 它只影响 BMI 和年龄，
